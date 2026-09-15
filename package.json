@@ -1,0 +1,32 @@
+{
+  "name": "war-millennium-tactics",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "dependencies": {
+    "expo": "~57.0.22",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/react": "~19.2.2",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:engine": "tsc -p tsconfig.engine.json",
+    "check": "npm test && npm run typecheck && npm run typecheck:engine",
+    "export:mobile": "expo export --platform android --platform ios"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

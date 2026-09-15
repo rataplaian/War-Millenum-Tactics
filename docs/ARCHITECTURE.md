@@ -1,4 +1,4 @@
-# Architecture — Task 002
+# Architecture — Task 003
 
 ## Dependency boundary and folders
 
@@ -17,7 +17,7 @@
 - `src/ui/GameScreen.tsx`: debug controls, messages and snapshots.
 - `tests/`: engine, dice, geometry, movement, coherency, engagement and coordinate conversion tests.
 
-## Definitions versus runtime state (schema 2)
+## Definitions versus runtime state
 
 Task 001 copied definition fields into each Unit. Task 002 deliberately replaces that shape:
 
@@ -29,7 +29,7 @@ Task 001 copied definition fields into each Unit. Task 002 deliberately replaces
 
 The engine copies loaded state and every returned snapshot. Readonly types protect catalog data at compile time; input/output copying protects the internal catalog at runtime. There is no command to edit catalog characteristics during play.
 
-`schemaVersion` is now **2**. Schema-1 snapshots are rejected explicitly; there was no shipped persistent save format to migrate. The original Task 001 test scenarios are retained, with static-field assertions adapted to catalog lookup. `loadMatch` accepts trusted typed snapshots and checks core identity, geometry, configuration and transaction invariants. It is not a complete parser for hostile/untyped JSON. A full parser and version migrations remain future work.
+`schemaVersion` is now **3**. Schema-1 and schema-2 snapshots are rejected explicitly; there was no shipped persistent save format to migrate. The original Task 001 test scenarios are retained, with static-field assertions adapted to catalog lookup. `loadMatch` accepts trusted typed snapshots and checks core identity, geometry, configuration and transaction invariants. It is not a complete parser for hostile/untyped JSON. A full parser and version migrations remain future work.
 
 ## Coordinates, battlefield and bases
 
@@ -79,7 +79,7 @@ The graph uses base edge distances. Each model must have enough neighbours and, 
 
 Expected illegal player actions return `{ ok: false, reason, ...details }`, with optional blockingModelId, distance, remaining or failing model IDs. Successful movement returns measured distance, cumulative use and remaining allowance. Rejections do not mutate coordinates, transactions, flags, usage or events. Corrupted loaded state throws before replacement.
 
-Movement events have deterministic sequence, round, turn, player and unit IDs. Types are movement-started, model-moved (from/to/distance/total used), movement-cancelled (restored positions) and movement-completed. They live in the snapshot for a future log/animation/debug layer; there are no timestamps or random IDs. Events are append-only within the current match, including cancelled attempts. This is **not** full event sourcing: no replay executor, phase-event history, disk persistence or log retention policy yet. A future replay must start from an initial snapshot and record any additional action types it needs.
+GameEvents (including the original movement events) have deterministic sequence, round, turn, player and unit IDs. Types are movement-started, model-moved (from/to/distance/total used), movement-cancelled (restored positions) and movement-completed. They live in the snapshot for a future log/animation/debug layer; there are no timestamps or random IDs. Events are append-only within the current match, including cancelled attempts. This is **not** full event sourcing: no replay executor, phase-event history, disk persistence or log retention policy yet. A future replay must start from an initial snapshot and record any additional action types it needs.
 
 Dice still require an explicit RNG; no movement command uses randomness. Future random battle commands need persisted RNG state or recorded outcomes before promising full replay/resume.
 
@@ -91,4 +91,57 @@ The debug screen distinguishes players by colour and labels, allows friendly uni
 
 ## Future extensions
 
-Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. No shooting, charges, melee, terrain, vertical movement, Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer or backend are included.
+Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. No charges, melee, terrain, vertical movement, Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer or backend are included.
+
+
+## Shooting subsystem (Task 003)
+
+The existing static/runtime separation and movement commands remain intact. Schema 3 adds `shooting`, the generic `GameEvent` union and `Battlefield.losBlockers`. Snapshots include catalog, health, active transactions and events, but not executable policies or RNG state. The previous 49 tests remain unchanged.
+
+New modules:
+
+- `rules/shootingTargets.ts`: shooter/weapon validation, engagement guard, range policy and target queries.
+- `rules/visibility.ts`: segment/rectangle intersection and replaceable VisibilityPolicy.
+- `rules/weaponValues.ts`: validation and fixed/dice value resolution using existing D6 utilities.
+- `rules/combatRolls.ts`: hit thresholds, strength/toughness wound targets and signed-AP saves.
+- `rules/damageAllocation.ts`: pure prototype allocation and damage application.
+- `rules/resolveShooting.ts`: sequential combat orchestration, returning updated target data and a serializable resolution.
+- `engine/validateShootingState.ts`: blocker, event-reference and shooting-transaction integrity checks.
+- `ui/ShootingPanel.tsx` and `ui/BattleLog.tsx`: legal choices from the engine and summaries from events.
+
+### Shooting transaction and commands
+
+`beginShooting(unitId)` requires Shooting phase, the active player's living unit, no previous completed shooting action, a ranged profile, no engagement and no open movement/shooting transaction. `getRangedWeapons(unitId)` lists unused profiles; `getLegalTargets(unitId, weaponId)` returns enemy units with eligible firing model IDs and nearest living-pair distance. Queries do not consume RNG or mutate state and can also be used before beginning an action.
+
+`fireWeapon(weaponId, targetUnitId, rng)` validates the action before consuming any RNG. Each ranged profile may fire once per action, even if it generates no hits. Different profiles can target different units. Every living eligible model has the unit definition's ranged profiles: heterogeneous per-model equipment is deliberately deferred.
+
+`completeShooting()` marks hasShot, even if no weapon was fired. `cancelShooting()` leaves hasShot unset and is allowed only while hasRolled is false. Dice-based attacks that roll zero still lock cancellation. Fixed zero attacks consume no RNG and can still be cancelled. Cancellation appends an event rather than deleting history. Phase/turn progression and movement cannot proceed during an open shooting action. Normal turn transitions reset hasShot.
+
+Expected failures are domain results and change neither health, transaction, events nor RNG. Resolution works on detached target data before committing, so a broken injected RNG/allocation policy can throw without partially changing battle state. Such programming errors cannot restore the external RNG stream: callers must repair the provider and restart from a known stream, not assume RNG rollback.
+
+### Range and replaceable basic LOS
+
+Range uses the centralized `rangedDistance` policy: base-edge distance in inches, inclusive at maximum range with the existing numerical tolerance. At least one living target must be both in range and visible to the same firing model. Dead models are excluded. nearestDistance describes the closest living pair and is not a claim that this pair is visible.
+
+`VisibilityPolicy(shooter, target, battlefield)` is injected through optional GameEngine policies. The default is centre-to-centre segment testing against opaque axis-aligned rectangles. Closed boundary contact, endpoints inside a blocker and corner tangency block LOS. Transparent blockers do not block. Other models never occlude. Blockers must be finite positive rectangles inside the battlefield and have unique IDs. The prototype has no blockers by default; tests provide dedicated blocker layouts. The UI renders blockers if supplied.
+
+These rectangles are temporary LOS geometry, not terrain: they impose no movement restrictions, cover, height, windows, obscuring, detection or indirect-fire rules. Future visibility implementations can replace the policy without altering combat resolution. Restore snapshots with the same policy configuration; functions are not serialized.
+
+### Deterministic resolution pipeline
+
+All random calls use the supplied RandomSource via the existing D6 helpers. The UI creates one seed-42 stream per test battle. The engine never uses Math.random, timestamps or random IDs. A full replay/resume system must later persist RNG state or supply the correct continuation stream; restoring a snapshot alone does not reconstruct the RNG.
+
+1. Resolve attacks independently for each eligible firing model in stable model order. Fixed values require no rolls; dice values record each roll and modifier result. Catalog validation rejects negative possible outcomes, invalid die counts/sides and unsafe integer values.
+2. Resolve each generated attack completely before the next: hit D6 against Skill, wound D6 against the centralized strength/toughness threshold, armour save, then damage for an unsaved wound.
+3. Wound targets are 2/3/4/5/6 according to the Task 003 strength-versus-toughness relationship. Skills are 2–6; no modifiers, rerolls or critical effects are applied.
+4. Required save is `Save - signedAP`. Save data supports 2–7 and AP is a non-positive integer. Requirements above 6 are automatically unsaved with a null save roll and no RNG consumption.
+5. Resolve fixed/dice damage and allocate to a wounded living model first, otherwise the first living model in stable snapshot array order. Allocation is a separate injectable pure policy. It selects from the target unit's living models, not just those originally visible/in range; this is an explicit prototype unit-wide allocation convention.
+6. Damage applies to exactly one model. Excess is lost; zero wounds means alive=false. Dead models stay in state and disappear from circles and subsequent movement/spatial/shooting queries.
+
+If the unit is destroyed, stop further hit/wound/save/damage rolls. `attacks` records all generated attacks; hitRolls.length records the attacks actually processed. Attack-count rolls happen before the sequential attacks, so their results are still recorded even when later attacks become unnecessary. `totalDamage` is wounds actually removed, excluding excess.
+
+### Combat events and extension points
+
+GameEvent preserves all movement variants and adds shooting-started, weapon-fired, model-damaged, model-destroyed, shooting-cancelled and shooting-completed. Every event uses deterministic sequence/round/turn/player/unit context. weapon-fired includes eligible model IDs, per-model attack rolls/counts, hit/wound rolls, saves, damage rolls, applied/excess damage and casualty IDs. It is followed by ordered damage/casualty detail events. The UI consumes these events directly; it does not recalculate combat outcomes. This remains a lightweight debug history, not event sourcing or a complete replay executor.
+
+Weapon traits remain inert data. Future attack-count/hit/wound/save stages can add weapon modifiers, Torrent, Rapid Fire, Sustained/Lethal Hits, Devastating Wounds, rerolls, invulnerable saves and Feel No Pain without moving rules into UI. Eligibility and visibility policies are the extension points for Pistols, Indirect Fire, detection and reaction shooting; allocation is the seam for Precision, attachments and player choice. None of those mechanics is implemented here.

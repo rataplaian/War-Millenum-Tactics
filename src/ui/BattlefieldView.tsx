@@ -21,6 +21,12 @@ export function BattlefieldView({ state, selectedModelId, target, onModel, onTar
       style={StyleSheet.absoluteFill} onPress={event => {
         if (transform) onTarget(transform.screenToGame({ x: event.nativeEvent.locationX, y: event.nativeEvent.locationY }));
       }} />
+    {transform && state.battlefield.losBlockers.map(blocker => {
+      const origin = transform.gameToScreen(blocker.position);
+      return <View pointerEvents="none" key={blocker.id} style={{ position: 'absolute', left: origin.x, top: origin.y,
+        width: blocker.width * transform.scale, height: blocker.height * transform.scale,
+        backgroundColor: blocker.opaque ? '#64748b' : '#475569', opacity: 0.6 }} />;
+    })}
     {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive).map((model, i) => {
       const centre = transform.gameToScreen(model.position);
       const diameter = baseRadius(model.base) * 2 * transform.scale;

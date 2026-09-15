@@ -31,7 +31,7 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 002
+## Current status: Task 003
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 
@@ -45,11 +45,20 @@ Implemented: immutable unit definitions separated from runtime instances, circul
 
 The field is a configurable 30″ × 24″ prototype. Both factions and all spatial-rule values are test fixtures, not official rules. Player 1 is blue; Player 2 is pink. A unit cannot complete a second normal movement action in the same turn. Engaged units and destinations within the configured enemy engagement distance are rejected for normal movement.
 
+### Try shooting
+
+1. Advance to **Shooting** after completing or cancelling any movement action.
+2. Use **SHOOT: [unit]**, select an available ranged weapon and one of the engine's legal targets, then **FIRE**.
+3. Read the battle log: attacks, hits, wounds, failed saves, actual damage and casualties. Dead circles are hidden; unit cards retain health/model counts.
+4. Use **COMPLETE SHOOTING** to finish. **CANCEL SHOOTING** is available only before any dice have been rolled.
+
+Both invented factions have ranged weapons. The engine supports one use per profile and different targets for different profiles. It checks base-edge range and basic centre-ray LOS, then resolves attacks → hits → wounds → armour saves → damage with an explicit RNG. The debug battle uses seed 42 for repeatable results. Default battlefield: no LOS blockers; rectangular blocker cases are tested separately.
+
 ### Scope and limits
 
-Collision checks only the final base position, not the path. No terrain, vertical movement, combat, charge rolls, Advance, Fall Back, transports, Deep Strike, AI, army building, missions, objectives, multiplayer, backend or polished art. No drag or zoom yet.
+Collision checks only the final base position, not the path. No full terrain, vertical movement, melee, charge rolls, Advance, Fall Back, transports, Deep Strike, AI, army building, missions, objectives, multiplayer, backend or polished art. No drag or zoom yet.
 
-Snapshots use schema version 2 and can restore an in-progress movement transaction in memory. Schema-1 snapshots are explicitly rejected. There is no disk save, replay executor or full untrusted-JSON parser; restarting the app resets the battle. Mobile export is not a real-device test or APK/IPA build.
+Snapshots use schema version 3 and can restore an in-progress movement transaction in memory. Schema-1 and schema-2 snapshots are explicitly rejected. Ranged loadouts are homogeneous, wound allocation is automatic and LOS is only a replaceable 2D rectangle policy. No weapon special rules, cover, invulnerable saves or Feel No Pain. RNG continuation is caller-owned and is not stored in snapshots. There is no disk save, replay executor or full untrusted-JSON parser; restarting the app resets the battle. Mobile export is not a real-device test or APK/IPA build.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 

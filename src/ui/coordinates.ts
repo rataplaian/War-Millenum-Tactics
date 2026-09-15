@@ -1,7 +1,7 @@
-import type { Battlefield, Position } from '../game/models';
+import type { BattlefieldDimensions, Position } from '../game/models';
 export interface Viewport { width: number; height: number }
 /** Uniform scale + letterboxing. This module contains no game rules. */
-export function coordinateTransform(field: Battlefield, viewport: Viewport) {
+export function coordinateTransform(field: BattlefieldDimensions, viewport: Viewport) {
   if (![field.width, field.height, viewport.width, viewport.height].every(n => Number.isFinite(n) && n > 0)) {
     throw new Error('Coordinate dimensions must be positive');
   }

@@ -9,6 +9,7 @@ export function definitionFor(state: GameState, unit: Unit): UnitDefinition {
 }
 export function movementPhaseError(state: GameState): CommandFailure | null {
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
+  if (state.shooting) return failure('SHOOTING_IN_PROGRESS');
   if (state.phase !== 'Movement') return failure('WRONG_PHASE');
   return null;
 }

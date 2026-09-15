@@ -28,7 +28,7 @@ test('units initialize unique models at fractional coordinates with full wounds'
   const state = createTestMatch(); const models = state.units.flatMap(u => u.models);
   assert.equal(new Set(models.map(m => m.id)).size, 6);
   for (const unit of state.units) for (const model of unit.models) {
-    assert.equal(model.unitId, unit.id); assert.equal(model.woundsRemaining, unit.stats.wounds); assert.equal(model.alive, true);
+    assert.equal(model.unitId, unit.id); assert.equal(model.woundsRemaining, state.definitions.find(d => d.id === unit.definitionId)!.stats.wounds); assert.equal(model.alive, true);
   }
   assert.deepEqual(state.units[0]!.models[0]!.position, { x: 4.5, y: 4.5 });
   assert.equal(state.units[0]!.state.hasShot, false);
@@ -36,9 +36,9 @@ test('units initialize unique models at fractional coordinates with full wounds'
 test('snapshots and fixtures are isolated from external mutations', () => {
   const source = createTestMatch(); const game = GameEngine.create(source);
   source.units[0]!.models[0]!.position.x = 900;
-  const snapshot = game.getState(); snapshot.units[0]!.stats.wounds = 900;
+  const snapshot = game.getState(); snapshot.units[0]!.models[0]!.woundsRemaining = 900;
   assert.equal(game.getState().units[0]!.models[0]!.position.x, 4.5);
-  assert.equal(game.getState().units[0]!.stats.wounds, 1);
+  assert.equal(game.getState().units[0]!.models[0]!.woundsRemaining, 1);
   assert.equal(PROTOTYPE_UNITS[0]!.stats.wounds, 1);
 });
 test('JSON snapshot round trip continues identically', () => {

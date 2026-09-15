@@ -1,0 +1,59 @@
+import type { CommandFailure, CommandResult, GameState, Model, Position, Unit, UnitDefinition } from '../models';
+import { baseInsideBattlefield, basesOverlap, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
+import { enemyModelsWithinEngagement, isUnitEngaged } from './spatial';
+export const failure = (reason: CommandFailure['reason']): CommandFailure => ({ ok: false, reason });
+export function definitionFor(state: GameState, unit: Unit): UnitDefinition {
+  const definition = state.definitions.find(d => d.id === unit.definitionId);
+  if (!definition) throw new Error(`Missing definition: ${unit.definitionId}`);
+  return definition;
+}
+export function movementPhaseError(state: GameState): CommandFailure | null {
+  if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
+  if (state.phase !== 'Movement') return failure('WRONG_PHASE');
+  return null;
+}
+export function validateBeginMovement(state: GameState, unitId: string): CommandResult<Unit> {
+  const error = movementPhaseError(state);
+  if (error) return error;
+  if (state.movement) return failure('MOVEMENT_IN_PROGRESS');
+  const unit = state.units.find(u => u.id === unitId);
+  if (!unit) return failure('UNIT_NOT_FOUND');
+  if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
+  if (unit.state.hasMoved) return failure('ALREADY_MOVED');
+  if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
+  if (isUnitEngaged(state, unit)) return failure('UNIT_ENGAGED');
+  return { ok: true, value: unit };
+}
+export interface MoveDetails { distance: number; totalUsed: number; remaining: number }
+/** Endpoint-only policy. A future path validator can precede this without changing commands. */
+export function validateFinalPosition(state: GameState, unit: Unit, model: Model, target: Position): CommandResult {
+  if (!isFinitePosition(target)) return failure('INVALID_POSITION');
+  const candidate = { ...model, position: target };
+  if (!baseInsideBattlefield(candidate, state.battlefield)) return failure('OUTSIDE_BATTLEFIELD');
+  const blocker = state.units.flatMap(u => u.models)
+    .find(other => other.alive && other.id !== model.id && basesOverlap(candidate, other));
+  if (blocker) return { ...failure('BASE_OVERLAP'), blockingModelId: blocker.id };
+  const enemy = enemyModelsWithinEngagement(state, unit.playerId, candidate)[0];
+  if (enemy) return { ...failure('ENEMY_ENGAGEMENT'), blockingModelId: enemy.id };
+  return { ok: true, value: undefined };
+}
+export function validateModelMove(state: GameState, modelId: string, target: Position): CommandResult<MoveDetails> {
+  const error = movementPhaseError(state);
+  if (error) return error;
+  if (!state.movement) return failure('NO_ACTIVE_MOVEMENT');
+  const unit = state.units.find(u => u.id === state.movement!.unitId);
+  if (!unit) throw new Error('Active movement unit is missing');
+  if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
+  const model = unit.models.find(m => m.id === modelId);
+  if (!model) return failure('MODEL_NOT_IN_UNIT');
+  if (!model.alive) return failure('MODEL_DEAD');
+  if (!isFinitePosition(target)) return failure('INVALID_POSITION');
+  const distance = distanceTravelled(model.position, target);
+  const allowance = definitionFor(state, unit).stats.movement;
+  const remaining = Math.max(0, allowance - model.movementUsed);
+  if (distance > remaining + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining };
+  const placement = validateFinalPosition(state, unit, model, target);
+  if (!placement.ok) return { ...placement, distance, remaining };
+  const totalUsed = Math.min(allowance, model.movementUsed + distance);
+  return { ok: true, value: { distance, totalUsed, remaining: Math.max(0, allowance - totalUsed) } };
+}

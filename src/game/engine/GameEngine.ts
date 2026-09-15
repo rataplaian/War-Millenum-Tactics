@@ -1,35 +1,93 @@
-import type { GameState } from '../models';
-import { PHASES } from '../models';
+import type { CommandResult, GameState, MovementEvent, Position } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
-const copy = (state: GameState): GameState => JSON.parse(JSON.stringify(state));
-/** Validates trusted typed snapshots; untrusted JSON will need a full schema parser later. */
-function validate(state: GameState): void {
-  if (state.schemaVersion !== 1 || !state.id || !Number.isSafeInteger(state.round) || state.round < 1 ||
-      !Number.isSafeInteger(state.turn) || state.turn < 1 || !PHASES.includes(state.phase) ||
-      !['in-progress', 'finished'].includes(state.status)) throw new Error('Invalid match state');
-  if (state.players.length !== 2 || new Set(state.players.map(p => p.id)).size !== 2 ||
-      state.players.some(p => !p.id || !p.factionId) || !state.players.some(p => p.id === state.activePlayerId)) throw new Error('Invalid players');
-  if (state.round !== Math.floor((state.turn - 1) / 2) + 1 || state.activePlayerId !== state.players[(state.turn - 1) % 2]!.id) throw new Error('Inconsistent turn');
-  const ids = [...state.armies.map(a => a.id), ...state.units.map(u => u.id), ...state.units.flatMap(u => u.models.map(m => m.id))];
-  if (ids.some(id => !id) || new Set(ids).size !== ids.length) throw new Error('Duplicate or empty entity IDs');
-  if (state.armies.length !== 2 || state.players.some(p => state.armies.filter(a => a.playerId === p.id && a.factionId === p.factionId).length !== 1)) throw new Error('Invalid armies');
-  const references = state.armies.flatMap(a => a.unitIds);
-  if (references.length !== state.units.length || new Set(references).size !== references.length || references.some(id => !state.units.some(u => u.id === id))) throw new Error('Invalid unit references');
-  for (const unit of state.units) {
-    const army = state.armies.find(a => a.unitIds.includes(unit.id));
-    if (!army || army.playerId !== unit.playerId || army.factionId !== unit.factionId || unit.models.length !== unit.modelCount || unit.modelCount < 1) throw new Error('Invalid unit ownership or model count');
-    for (const model of unit.models) {
-      if (model.unitId !== unit.id || !Number.isInteger(model.woundsRemaining) || model.woundsRemaining < 0 || model.woundsRemaining > unit.stats.wounds ||
-          model.alive !== (model.woundsRemaining > 0) || !Number.isFinite(model.position.x) || !Number.isFinite(model.position.y)) throw new Error('Invalid model');
-    }
-  }
-}
+import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
+import { checkCoherency } from '../rules/spatial';
+import { validateState } from './validateState';
+const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+type EventPayload = MovementEvent extends infer E ? E extends MovementEvent ?
+  Omit<E, 'sequence' | 'round' | 'turn' | 'playerId' | 'unitId'> : never : never;
 export class GameEngine {
   private state: GameState;
-  constructor(initialState: GameState) { validate(initialState); this.state = copy(initialState); }
+  constructor(initialState: GameState) { validateState(initialState); this.state = copy(initialState); }
   static create(initialState: GameState): GameEngine { return new GameEngine(initialState); }
-  loadMatch(snapshot: GameState): void { validate(snapshot); this.state = copy(snapshot); }
+  loadMatch(snapshot: GameState): void { validateState(snapshot); this.state = copy(snapshot); }
   getState(): GameState { return copy(this.state); }
-  nextPhase(): GameState { this.state = advancePhase(this.state); return this.getState(); }
-  nextTurn(): GameState { this.state = advanceTurn(this.state); return this.getState(); }
+
+  /** Legacy Task 001 helpers. New UI commands use tryNextPhase/tryNextTurn results. */
+  nextPhase(): GameState {
+    const result = this.tryNextPhase();
+    if (!result.ok) throw new Error(result.reason);
+    return result.value;
+  }
+  nextTurn(): GameState {
+    const result = this.tryNextTurn();
+    if (!result.ok) throw new Error(result.reason);
+    return result.value;
+  }
+  tryNextPhase(): CommandResult<GameState> { return this.progress(advancePhase); }
+  tryNextTurn(): CommandResult<GameState> { return this.progress(advanceTurn); }
+  private progress(transition: (state: GameState) => GameState): CommandResult<GameState> {
+    if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
+    if (this.state.movement) return failure('MOVEMENT_IN_PROGRESS');
+    this.state = transition(this.state);
+    return { ok: true, value: this.getState() };
+  }
+  private event(unitId: string, payload: EventPayload): void {
+    this.state.events.push(copy({ ...payload, sequence: this.state.events.length + 1,
+      round: this.state.round, turn: this.state.turn, playerId: this.state.activePlayerId, unitId } as MovementEvent));
+  }
+  beginMovement(unitId: string): CommandResult {
+    const result = validateBeginMovement(this.state, unitId);
+    if (!result.ok) return result;
+    this.state.movement = { unitId, originals: result.value.models.map(m => ({
+      modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
+    this.event(unitId, { type: 'movement-started' });
+    return { ok: true, value: undefined };
+  }
+  /** Same validator as moveModel, with no state changes or emitted events. */
+  previewMove(modelId: string, target: Position) { return validateModelMove(this.state, modelId, target); }
+  moveModel(modelId: string, target: Position) {
+    const result = this.previewMove(modelId, target);
+    if (!result.ok) return result;
+    const unit = this.state.units.find(u => u.id === this.state.movement!.unitId)!;
+    const model = unit.models.find(m => m.id === modelId)!;
+    const from = { ...model.position };
+    model.position = { ...target };
+    model.movementUsed = result.value.totalUsed;
+    this.event(unit.id, { type: 'model-moved', modelId, from, to: { ...target },
+      distance: result.value.distance, totalUsed: result.value.totalUsed });
+    return result;
+  }
+  cancelMovement(): CommandResult {
+    const error = movementPhaseError(this.state);
+    if (error) return error;
+    const transaction = this.state.movement;
+    if (!transaction) return failure('NO_ACTIVE_MOVEMENT');
+    const unit = this.state.units.find(u => u.id === transaction.unitId)!;
+    for (const original of transaction.originals) {
+      const model = unit.models.find(m => m.id === original.modelId)!;
+      model.position = { ...original.position };
+      model.movementUsed = original.movementUsed;
+    }
+    this.state.movement = null;
+    this.event(unit.id, { type: 'movement-cancelled', restored: transaction.originals.map(o => ({ modelId: o.modelId, position: { ...o.position } })) });
+    return { ok: true, value: undefined };
+  }
+  completeMovement(): CommandResult {
+    const error = movementPhaseError(this.state);
+    if (error) return error;
+    if (!this.state.movement) return failure('NO_ACTIVE_MOVEMENT');
+    const unit = this.state.units.find(u => u.id === this.state.movement!.unitId)!;
+    for (const model of unit.models.filter(m => m.alive)) {
+      const placement = validateFinalPosition(this.state, unit, model, model.position);
+      if (!placement.ok) return placement;
+    }
+    const coherency = checkCoherency(unit.models, this.state.spatialRules.coherency);
+    if (!coherency.coherent) return { ...failure('INCOHERENT'), modelIds: coherency.failingModelIds.length ?
+      coherency.failingModelIds : unit.models.filter(m => m.alive).map(m => m.id) };
+    unit.state.hasMoved = true;
+    this.state.movement = null;
+    this.event(unit.id, { type: 'movement-completed' });
+    return { ok: true, value: undefined };
+  }
 }

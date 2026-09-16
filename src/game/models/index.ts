@@ -41,7 +41,7 @@ export type UnitDefinition = DeepReadonly<{
   defaultBase: BaseGeometry;
   keywords: string[]; weapons: Weapon[]; abilities: Ability[]; placeholder: boolean;
 }>;
-export interface UnitState { hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
+export interface UnitState { hasAdvanced?: boolean; hasFallenBack?: boolean; hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
 /** Mutable battle data only. Static characteristics resolve through definitionId. */
 export interface Unit {
   id: string;
@@ -88,6 +88,8 @@ export interface GameState {
   movement: MovementTransaction | null;
   shooting: ShootingTransaction | null;
   events: GameEvent[];
+  /** Optional for loading unmodified Task 003 snapshots. */
+  closeCombat?: CloseCombatState;
 }
 export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
@@ -96,7 +98,11 @@ export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' 
   'SHOOTING_IN_PROGRESS' | 'NO_ACTIVE_SHOOTING' | 'ALREADY_SHOT' | 'NO_RANGED_WEAPONS' |
   'WEAPON_NOT_FOUND' | 'WEAPON_NOT_RANGED' | 'WEAPON_ALREADY_FIRED' | 'TARGET_NOT_FOUND' |
   'TARGET_NOT_ENEMY' | 'TARGET_DESTROYED' | 'TARGET_OUT_OF_RANGE' | 'TARGET_NOT_VISIBLE' |
-  'NO_ELIGIBLE_FIRING_MODELS' | 'SHOOTING_ALREADY_RESOLVED';
+  'NO_ELIGIBLE_FIRING_MODELS' | 'SHOOTING_ALREADY_RESOLVED' |
+  'COMBAT_IN_PROGRESS' | 'CHARGE_INELIGIBLE' | 'ALREADY_DECLARED' | 'NO_CHARGE' | 'TARGETS_REQUIRED' |
+  'UNREACHABLE_TARGET' | 'IRREVERSIBLE_ACTION' | 'NO_COMBAT_MOVE' | 'NOT_CLOSER' | 'MUST_ENGAGE' |
+  'BASE_CONTACT_LOCKED' | 'INVALID_FINAL_ENGAGEMENT' | 'WRONG_FIGHT_STEP' | 'WRONG_FIGHT_PLAYER' |
+  'UNIT_NOT_ELIGIBLE' | 'NO_FIGHT_SELECTED' | 'WEAPON_NOT_MELEE' | 'NO_ELIGIBLE_FIGHTERS';
 export interface CommandFailure {
   ok: false;
   reason: FailureReason;
@@ -149,10 +155,51 @@ export type ShootingEvent = EventContext & (
   { type: 'shooting-cancelled' } |
   { type: 'shooting-completed' }
 );
-export type GameEvent = MovementEvent | ShootingEvent;
+export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent;
 export interface LegalTarget {
   targetUnitId: string;
   eligibleFiringModelIds: string[];
   /** Closest living pair, in inches, whether or not that pair is visible. */
   nearestDistance: number;
 }
+
+export type CombatMoveKind = 'charge' | 'pile-in' | 'overrun' | 'consolidate';
+export interface TemporaryEffect { unitId: string; kind: 'FIGHTS_FIRST'; expiresAt: 'END_OF_TURN'; turn: number }
+export interface CombatMove extends MovementTransaction {
+  kind: CombatMoveKind;
+  targetIds: string[];
+  allowance: number;
+  used: Record<string, number>;
+}
+export interface ChargeAction { unitId: string; rolls: number[]; distance: number; targetIds: string[] }
+export type FightStep = 'START' | 'PILE_IN' | 'FIGHT' | 'CONSOLIDATE' | 'END';
+export interface FightPhaseState {
+  step: FightStep;
+  category: 'FIGHTS_FIRST' | 'REMAINING_COMBATS';
+  nextPlayerId: string;
+  pileInDone: string[];
+  eligibleAtFightStart: string[];
+  engagedAtFightStart: string[];
+  fought: string[];
+  consolidateDone: string[];
+  selected: { unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
+}
+export interface CloseCombatState {
+  charge: ChargeAction | null;
+  move: CombatMove | null;
+  declared: string[];
+  effects: TemporaryEffect[];
+  fight: FightPhaseState | null;
+}
+export type CloseCombatEvent = EventContext & (
+  { type: 'charge-declared' } |
+  { type: 'charge-rolled'; rolls: number[]; distance: number } |
+  { type: 'charge-target-selected'; targetIds: string[] } |
+  { type: 'charge-failed' } |
+  { type: 'combat-move-started'; kind: CombatMoveKind; targetIds: string[] } |
+  { type: 'combat-model-moved'; kind: CombatMoveKind; modelId: string; from: Position; to: Position; distance: number; totalUsed: number } |
+  { type: 'combat-move-completed' | 'combat-move-cancelled'; kind: CombatMoveKind } |
+  { type: 'fight-unit-selected' | 'fight-unit-completed' | 'fight-unit-cancelled' | 'overrun-fight' } |
+  { type: 'melee-attack-started'; weaponId: string; targetUnitId: string } |
+  { type: 'melee-attack-resolved'; resolution: WeaponResolution }
+);

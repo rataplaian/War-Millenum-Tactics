@@ -1,3 +1,4 @@
+import { validateCloseCombatState } from './validateCloseCombatState';
 import { PHASES, type GameState } from '../models';
 import { baseInsideBattlefield, basesOverlap, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { definitionFor } from '../rules/movement';
@@ -69,4 +70,5 @@ export function validateState(state: GameState): void {
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || !state.units.some(u => u.id === event.unitId))) throw new Error('Invalid event sequence');
   validateShootingState(state);
+  validateCloseCombatState(state);
 }

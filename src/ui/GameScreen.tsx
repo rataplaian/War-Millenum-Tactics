@@ -3,13 +3,14 @@ import { Button, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { GameEngine } from '../game/engine/GameEngine';
-import { createTestMatch } from '../game/data/prototype';
+import { createCloseCombatTestMatch } from '../game/data/closeCombatPrototype';
+import { CloseCombatPanel } from './CloseCombatPanel';
 import type { CommandResult, FailureReason, GameState, Position } from '../game/models';
 import { BattlefieldView, PLAYER_COLORS } from './BattlefieldView';
 import { ShootingPanel } from './ShootingPanel';
 import { BattleLog } from './BattleLog';
 import { createSeededRng, type RandomSource } from '../game/utils/dice';
-const MESSAGES: Record<FailureReason, string> = {
+const MESSAGES: Partial<Record<FailureReason, string>> = {
   MATCH_FINISHED: 'The match has finished.', WRONG_PHASE: 'This action is not available in the current phase.',
   UNIT_NOT_FOUND: 'Unit not found.', NOT_YOUR_UNIT: 'Select a unit belonging to the active player.',
   ALREADY_MOVED: 'This unit has already completed its movement.', NO_LIVING_MODELS: 'This unit has no living models.',
@@ -34,11 +35,11 @@ export function GameScreen() {
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
   function report(result: CommandResult<unknown>, success: string) {
-    setMessage(result.ok ? success : `${MESSAGES[result.reason]}${result.blockingModelId ? ` Blocker: ${result.blockingModelId}.` : ''}`);
+    setMessage(result.ok ? success : `${MESSAGES[result.reason] ?? result.reason.replaceAll("_", " ")}${result.blockingModelId ? ` Blocker: ${result.blockingModelId}.` : ''}`);
     setState(engine.current!.getState());
   }
   function start() {
-    engine.current = GameEngine.create(createTestMatch());
+    engine.current = GameEngine.create(createCloseCombatTestMatch());
     rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
@@ -50,6 +51,10 @@ export function GameScreen() {
   }
   function chooseModel(unitId: string, modelId: string) {
     const current = engine.current!.getState();
+    if (current.closeCombat?.move) {
+      if (current.closeCombat.move.unitId !== unitId) { setMessage('Select a model from the moving unit.'); return; }
+      setSelectedModelId(modelId); setTarget(null); return;
+    }
     if (!current.movement) {
       const result = engine.current!.beginMovement(unitId);
       report(result, 'Model selected. Tap its destination.');
@@ -61,6 +66,10 @@ export function GameScreen() {
   }
   function move(position: Position) {
     if (!selectedModelId) { setMessage('Select a friendly unit and one of its models first.'); return; }
+    if (engine.current!.getState().closeCombat?.move) {
+      const result = engine.current!.moveCombatModel(selectedModelId, position);
+      setTarget({ position, legal: result.ok }); report(result, 'Position accepted. Complete movement to validate the final formation.'); return;
+    }
     const result = engine.current!.moveModel(selectedModelId, position);
     setTarget({ position, legal: result.ok });
     report(result, result.ok ? `Legal move: ${result.value.distance.toFixed(2)}″. Remaining: ${result.value.remaining.toFixed(2)}″.` : '');
@@ -72,12 +81,12 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Movement and shooting</Text><Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Movement, shooting, charge and fight</Text><Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
-      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement') chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement') move(position); }} />
+      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>
       {state.units.map(unit => {
         const definition = state.definitions.find(d => d.id === unit.definitionId)!;
@@ -97,9 +106,10 @@ export function GameScreen() {
         </View>;
       })}
       {state.phase === 'Shooting' && <ShootingPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />}
+      {(state.phase === 'Charge' || state.phase === 'Fight') && <CloseCombatPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />}
       <Button title="COMPLETE MOVE" disabled={!state.movement} onPress={() => finish(false)} />
       <Button title="CANCEL MOVE" disabled={!state.movement} onPress={() => finish(true)} />
-      <Button title="NEXT PHASE" disabled={!!state.movement || !!state.shooting} onPress={() => {
+      <Button title="NEXT PHASE" disabled={!!state.movement || !!state.shooting || !!state.closeCombat?.charge || !!state.closeCombat?.move} onPress={() => {
         report(engine.current!.tryNextPhase(), 'Phase advanced.'); setSelectedModelId(null); setTarget(null);
       }} />
       <BattleLog events={state.events} />

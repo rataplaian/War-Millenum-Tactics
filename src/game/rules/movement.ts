@@ -27,7 +27,7 @@ export function validateBeginMovement(state: GameState, unitId: string): Command
 }
 export interface MoveDetails { distance: number; totalUsed: number; remaining: number }
 /** Endpoint-only policy. A future path validator can precede this without changing commands. */
-export function validateFinalPosition(state: GameState, unit: Unit, model: Model, target: Position): CommandResult {
+export function validateFinalPosition(state: GameState, unit: Unit, model: Model, target: Position, allowEngagement = false): CommandResult {
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
   const candidate = { ...model, position: target };
   if (!baseInsideBattlefield(candidate, state.battlefield)) return failure('OUTSIDE_BATTLEFIELD');
@@ -35,7 +35,7 @@ export function validateFinalPosition(state: GameState, unit: Unit, model: Model
     .find(other => other.alive && other.id !== model.id && basesOverlap(candidate, other));
   if (blocker) return { ...failure('BASE_OVERLAP'), blockingModelId: blocker.id };
   const enemy = enemyModelsWithinEngagement(state, unit.playerId, candidate)[0];
-  if (enemy) return { ...failure('ENEMY_ENGAGEMENT'), blockingModelId: enemy.id };
+  if (enemy && !allowEngagement) return { ...failure('ENEMY_ENGAGEMENT'), blockingModelId: enemy.id };
   return { ok: true, value: undefined };
 }
 export function validateModelMove(state: GameState, modelId: string, target: Position): CommandResult<MoveDetails> {

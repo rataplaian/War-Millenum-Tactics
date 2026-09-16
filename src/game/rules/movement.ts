@@ -1,3 +1,5 @@
+import { temporalBlock } from '../flow/TimingWindows';
+import { effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath, validateTerrainPosition } from '../terrain/movement';
 import { modelsOverlap } from '../terrain/geometry';
@@ -11,6 +13,7 @@ export function definitionFor(state: GameState, unit: Unit): UnitDefinition {
   return definition;
 }
 export function movementPhaseError(state: GameState): CommandFailure | null {
+  const block = temporalBlock(state); if (block) return block;
   if (!battleStarted(state)) return failure('PRE_BATTLE');
   if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
@@ -27,6 +30,7 @@ export function validateBeginMovement(state: GameState, unitId: string): Command
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
+  if (effectiveFlag(state, unit.id, 'CANNOT_MOVE')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasMoved) return failure('ALREADY_MOVED');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (isUnitEngaged(state, unit)) return failure('UNIT_ENGAGED');
@@ -60,7 +64,7 @@ export function validateModelMove(state: GameState, modelId: string, target: Pos
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
   const terrainPath = validateTerrainPath(state, model, target, path);
   const distance = terrainPath.ok ? terrainPath.value.totalMovementDistance : distanceTravelled(model.position, target);
-  const allowance = definitionFor(state, unit).stats.movement;
+  const allowance = effectiveCharacteristic(state, unit.id, 'MOVE', definitionFor(state, unit).stats.movement);
   const remaining = Math.max(0, allowance - model.movementUsed);
   if (distance > remaining + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining };
   if (!terrainPath.ok) return terrainPath;

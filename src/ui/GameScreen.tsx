@@ -1,3 +1,4 @@
+import { CommandPanel } from './CommandPanel';
 import { createDeploymentTestMatch } from '../game/data/deploymentPrototype';
 import { DeploymentPanel } from './DeploymentPanel';
 import { battleStarted, onBattlefield } from '../game/reserves/location';
@@ -48,6 +49,7 @@ export function GameScreen() {
   function start() {
     setSelectedModelId(null); setTarget(null); setTargetZ(0);
     engine.current = GameEngine.create(scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
+    engine.current.enableMatchFlow();
     rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
@@ -90,12 +92,13 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Terrain and visibility</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
       {state.deployment && <DeploymentPanel state={state} engine={engine.current!} report={report} />}
       {battleStarted(state) && !state.setup && <>
+      <CommandPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
       <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>

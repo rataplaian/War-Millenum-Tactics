@@ -1,3 +1,13 @@
+import { MatchFlowController, enableFlow } from '../flow/MatchFlowController';
+import { CommandController } from '../command/CommandController';
+import { passWindow, openWindow, temporalBlock } from '../flow/TimingWindows';
+import type { FlowPolicies, FlowRules } from '../flow/types';
+import { StratagemEngine } from '../stratagems/StratagemEngine';
+import type { StratagemPolicies } from '../stratagems/types';
+import { gainCommandPoints, spendCommandPoints, canSpendCommandPoints } from '../resources/CommandPoints';
+import { applyEffect, effectiveCharacteristic, effectiveObjectiveControl, removeEffect } from '../effects/EffectEngine';
+import type { EffectInput } from '../effects/types';
+import { canStartAction, canCompleteAction, fallBackOptions } from '../command/BattleShock';
 import { DeploymentController, nextDeploymentPlayer } from '../deployment/DeploymentController';
 import { ScoutController } from '../deployment/ScoutController';
 import { SetupController } from '../setup/SetupController';
@@ -24,7 +34,7 @@ import { type VisibilityPolicy } from '../rules/visibility';
 import { allocateDamage, type DamageAllocationPolicy } from '../rules/damageAllocation';
 import { resolveShooting } from '../rules/resolveShooting';
 import type { RandomSource } from '../utils/dice';
-export interface EnginePolicies { setup?: SetupPolicy; reserves?: ReservePolicy; visibility?: VisibilityPolicy; visibilityProvider?: VisibilityProviderFactory; detectionRange?: DetectionRangePolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
+export interface EnginePolicies { flow?: FlowPolicies; stratagems?: StratagemPolicies; setup?: SetupPolicy; reserves?: ReservePolicy; visibility?: VisibilityPolicy; visibilityProvider?: VisibilityProviderFactory; detectionRange?: DetectionRangePolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 type EventPayload = GameEvent extends infer E ? E extends GameEvent ?
@@ -48,8 +58,18 @@ export class GameEngine {
     return result.value;
   }
   tryNextPhase(): CommandResult<GameState> { return this.progress(advancePhase); }
-  tryNextTurn(): CommandResult<GameState> { return this.progress(advanceTurn); }
+  tryNextTurn(): CommandResult<GameState> { if (this.state.flow && this.state.phase !== 'Fight') return failure('PHASE_BLOCKED'); return this.progress(advanceTurn); }
   private progress(transition: (state: GameState) => GameState): CommandResult<GameState> {
+    if (this.state.flow) {
+      const draft = this.getState(), before = this.getState();
+      const result = new MatchFlowController(draft, this.policies.flow).advance();
+      if (!result.ok) return result;
+      if (draft.round > before.round) resolveReserveExpiration(draft, before.round, this.policies.reserves);
+      if (draft.status === 'finished') resolveReserveExpiration(draft, draft.round, this.policies.reserves, true);
+      if (draft.phase === 'Charge' || draft.turn > before.turn) for (const u of draft.units) delete u.moveLock;
+      recordTerrainChanges(before, draft); this.state = draft;
+      return { ok: true, value: this.getState() };
+    }
     if (!battleStarted(this.state)) return failure('PRE_BATTLE');
     if (setupBusy(this.state)) return failure('SETUP_IN_PROGRESS');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
@@ -142,11 +162,24 @@ export class GameEngine {
   getLegalTargets(unitId: string, weaponId: string) {
     return copy(legalShootingTargets(this.state, unitId, weaponId, this.visibility()));
   }
+  selectShootingTarget(weaponId: string, targetUnitId: string): CommandResult {
+    return this.flowCommand(s => {
+      const block = temporalBlock(s); if (block) return block;
+      if (!s.shooting) return failure('NO_ACTIVE_SHOOTING');
+      if (s.shooting.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
+      const legal = validateShootingTarget(s, s.shooting.unitId, weaponId, targetUnitId, this.visibility());
+      if (!legal.ok) return legal;
+      s.shooting.selectedTarget = { weaponId, targetUnitId };
+      openWindow(s, 'AFTER_TARGET_SELECTED', { unitId: s.shooting.unitId, targetUnitId });
+      return { ok: true, value: undefined };
+    });
+  }
   fireWeapon(weaponId: string, targetUnitId: string, rng: RandomSource): CommandResult<WeaponResolution> {
     const error = shootingPhaseError(this.state);
     if (error) return error;
     const transaction = this.state.shooting;
     if (!transaction) return failure('NO_ACTIVE_SHOOTING');
+    if (this.state.flow && (!transaction.selectedTarget || transaction.selectedTarget.weaponId !== weaponId || transaction.selectedTarget.targetUnitId !== targetUnitId)) return failure('TARGET_SELECTION_REQUIRED');
     const provider = this.visibility();
     const legal = validateShootingTarget(this.state, transaction.unitId, weaponId, targetUnitId,
       provider);
@@ -160,14 +193,15 @@ export class GameEngine {
     const shooter = this.state.units.find(u => u.id === transaction.unitId)!;
     const modifiers = shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => shootingModifiers(this.state, m, target, weapon.value.skill, provider));
     const outcome = resolveShooting(weapon.value, legal.value.eligibleFiringModelIds, copy(target),
-      definitionFor(this.state, target), rng, this.policies.damageAllocation ?? allocateDamage, modifiers);
+      definitionFor(this.state, target), rng, this.policies.damageAllocation ?? allocateDamage, modifiers, this.state);
     this.state.units = this.state.units.map(u => u.id === target.id ? outcome.target : u);
     if (outcome.resolution.attacks > 0) shooter.lastRangedAttackTurnIndex = this.state.turn;
+    delete transaction.selectedTarget;
     transaction.firedWeaponIds.push(weaponId);
     transaction.hasRolled ||= outcome.resolution.hitRolls.length > 0 ||
       outcome.resolution.attackCounts.some(count => count.resolved.rolls.length > 0);
     this.event(transaction.unitId, { type: 'weapon-fired', resolution: outcome.resolution });
-    for (const m of modifiers) for (const modifier of m.modifiers) this.event(transaction.unitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId, effectiveSkill: m.effectiveSkill });
+    for (const m of modifiers) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(transaction.unitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId, effectiveSkill: m.effectiveSkill });
     recordTerrainChanges(before, this.state);
     normalizeDestroyed(this.state);
     for (const damage of outcome.resolution.damageResults) {
@@ -180,7 +214,7 @@ export class GameEngine {
     const error = shootingPhaseError(this.state);
     if (error) return error;
     if (!this.state.shooting) return failure('NO_ACTIVE_SHOOTING');
-    if (this.state.shooting.hasRolled) return failure('SHOOTING_ALREADY_RESOLVED');
+    if (this.state.shooting.hasRolled || this.state.shooting.selectedTarget) return failure('SHOOTING_ALREADY_RESOLVED');
     const { unitId } = this.state.shooting;
     this.state.shooting = null;
     this.event(unitId, { type: 'shooting-cancelled' });
@@ -191,16 +225,24 @@ export class GameEngine {
     if (error) return error;
     if (!this.state.shooting) return failure('NO_ACTIVE_SHOOTING');
     const { unitId } = this.state.shooting;
+    if (this.state.shooting.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
     this.state.units.find(u => u.id === unitId)!.state.hasShot = true;
     this.state.shooting = null;
     this.event(unitId, { type: 'shooting-completed' });
+    openWindow(this.state, 'AFTER_UNIT_SHOT', { unitId });
     return { ok: true, value: undefined };
   }
 
   private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
     const draft = this.getState();
+    const block = temporalBlock(draft); if (block) return block;
     const result = command(new CloseCombatController(draft));
-    if (result.ok) { normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) {
+      for (const event of draft.events.slice(this.state.events.length)) {
+        if (event.type === 'combat-move-completed' && event.kind === 'charge') openWindow(draft, 'AFTER_CHARGE_MOVE', { unitId: event.unitId });
+        if (event.type === 'fight-unit-completed') openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: event.unitId });
+      }
+      normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
     return copy(result);
   }
   declareCharge(unitId: string, rng: RandomSource) {
@@ -248,8 +290,9 @@ export class GameEngine {
 
   private setupCommand<T>(command: (draft: GameState) => CommandResult<T>): CommandResult<T> {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
+    const block = temporalBlock(this.state); if (block) return block;
     const draft = this.getState(), result = command(draft);
-    if (result.ok) { recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) { new MatchFlowController(draft, this.policies.flow).start(); recordTerrainChanges(this.state, draft); this.state = draft; }
     return copy(result);
   }
   advancePreBattle() { return this.setupCommand(s => new DeploymentController(s).advance()); }
@@ -282,6 +325,39 @@ export class GameEngine {
       resolveReserveExpiration(s, s.round, this.policies.reserves, true); s.status = 'finished';
       return { ok: true, value: undefined };
     });
+  }
+
+  private flowCommand<T>(command: (draft: GameState) => CommandResult<T>): CommandResult<T> {
+    if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
+    if (!this.state.flow) return failure('FLOW_REQUIRED');
+    const draft = this.getState(), result = command(draft);
+    if (result.ok) { validateState(draft); this.state = draft; }
+    return copy(result);
+  }
+  /** Explicit migration: legacy snapshots keep their original phase progression until enabled. */
+  enableMatchFlow(rules: Partial<FlowRules> = {}): CommandResult {
+    const draft = this.getState(), result = enableFlow(draft, rules);
+    if (result.ok) { new MatchFlowController(draft, this.policies.flow).start(); validateState(draft); this.state = draft; }
+    return result;
+  }
+  canAdvancePhase() { return new MatchFlowController(this.getState(), this.policies.flow).canAdvancePhase(); }
+  advanceCommandStep() { return this.flowCommand(s => new CommandController(s, this.policies.flow).advance()); }
+  rollBattleShock(unitId: string, rng: RandomSource) { return this.flowCommand(s => new CommandController(s, this.policies.flow).roll(unitId, rng)); }
+  getCommandAbilities() { return copy(new CommandController(this.getState(), this.policies.flow).options()); }
+  resolveCommandAbility(id: string) { return this.flowCommand(s => new CommandController(s, this.policies.flow).resolve(id)); }
+  passTimingWindow(playerId: string) { return this.flowCommand(s => passWindow(s, playerId)); }
+  getStratagemOptions(playerId: string) { return copy(new StratagemEngine(this.getState(), this.policies.stratagems).options(playerId)); }
+  useStratagem(id: string, playerId: string, targets: string[]) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets)); }
+  gainCommandPoints(playerId: string, amount: number, policy: { ignoreLimit?: boolean; limit?: number } = {}) { return this.flowCommand(s => gainCommandPoints(s, playerId, amount, 'OTHER_CP_GAIN', policy)); }
+  canSpendCommandPoints(playerId: string, amount: number) { return canSpendCommandPoints(this.state, playerId, amount); }
+  spendCommandPoints(playerId: string, amount: number) { return this.flowCommand(s => spendCommandPoints(s, playerId, amount)); }
+  addTemporaryEffect(effect: EffectInput) { return this.flowCommand(s => ({ ok: true, value: applyEffect(s, effect) })); }
+  removeTemporaryEffect(id: string) { return this.flowCommand(s => { removeEffect(s, id); return { ok: true, value: undefined }; }); }
+  getCommandDebug() {
+    const s = this.getState(); return { blockers: this.canAdvancePhase().blockingReasons,
+      units: s.units.map(u => ({ id: u.id, battleShocked: !!u.state.battleShocked, objectiveControl: effectiveObjectiveControl(s, u),
+        canStartAction: canStartAction(u), canCompleteAction: canCompleteAction(u), ...fallBackOptions(s, u),
+        movement: effectiveCharacteristic(s, u.id, 'MOVE', definitionFor(s, u).stats.movement) })) };
   }
 
   getSetupFormationAt(anchor: Position): Formation {

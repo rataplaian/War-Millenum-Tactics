@@ -1,3 +1,4 @@
+import { effectiveFlag } from '../effects/EffectEngine';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CloseCombatState, CommandResult, GameState, Model, Position, Unit } from '../models';
@@ -12,7 +13,7 @@ export const living = (unit: Unit) => onBattlefield(unit) ? unit.models.filter(m
 export const enemies = (state: GameState, unit: Unit) => state.units.filter(u => u.playerId !== unit.playerId && living(u).length);
 export const unitDistance = (a: Unit, b: Unit) => Math.min(...living(a).flatMap(m => living(b).map(n => edgeDistance(m, n))));
 export const engagedTargets = (state: GameState, unit: Unit) => enemies(state, unit).filter(u => unitDistance(unit, u) <= state.spatialRules.engagementDistance + EPSILON);
-export const hasFightsFirst = (state: GameState, unit: Unit) => state.closeCombat?.effects.some(e => e.unitId === unit.id && e.kind === 'FIGHTS_FIRST' && e.turn === state.turn) ?? false;
+export const hasFightsFirst = (state: GameState, unit: Unit) => effectiveFlag(state, unit.id, 'FIGHTS_FIRST', state.closeCombat?.effects.some(e => e.unitId === unit.id && e.kind === 'FIGHTS_FIRST' && e.turn === state.turn) ?? false);
 export interface ChargeExceptions { afterAdvance?: boolean; afterFallBack?: boolean; whileEngaged?: boolean }
 /** Generic extension point: future ability evaluation supplies permissions. */
 export function canDeclareCharge(state: GameState, unitId: string, exceptions: ChargeExceptions = {}): CommandResult<Unit> {
@@ -23,6 +24,7 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   if (state.movement || state.shooting || state.closeCombat?.charge || state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
+  if (effectiveFlag(state, unit.id, 'CANNOT_CHARGE')) return failure('CHARGE_INELIGIBLE');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
@@ -33,6 +35,7 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   return { ok: true, value: unit };
 }
 export function getModelsEligibleToFight(state: GameState, unit: Unit, target?: Unit): Model[] {
+  if (effectiveFlag(state, unit.id, 'CANNOT_FIGHT')) return [];
   const targets = target ? [target] : enemies(state, unit);
   return living(unit).filter(m => targets.some(u => u.playerId !== unit.playerId && living(u).some(n => edgeDistance(m, n) <= state.spatialRules.engagementDistance + EPSILON)));
 }

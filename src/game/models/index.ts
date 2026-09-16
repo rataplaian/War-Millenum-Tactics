@@ -1,3 +1,4 @@
+import type { MatchFlowState, FlowEvent } from '../flow/types';
 import type { CoreAbility, UnitLocation, ReserveRecord, ArrivalRecord, DeploymentState, SetupTransaction, ScoutMoveTransaction, SetupEventType } from '../setup/types';
 export type FactionId = string;
 export type PlayerId = string;
@@ -17,7 +18,7 @@ export interface Battlefield { width: number; height: number; losBlockers: LosBl
 export type BattlefieldDimensions = Pick<Battlefield, 'width' | 'height'>;
 /** Extend this discriminated union for hulls later. Radius is derived, never stored. */
 export type BaseGeometry = { kind: 'circle'; diameterMm: number };
-export interface Player { id: PlayerId; name: string; factionId: FactionId }
+export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
   id: string;
@@ -27,6 +28,7 @@ export interface Model {
   alive: boolean;
   base: BaseGeometry;
   movementUsed: number;
+  leadership?: number;
   coreAbilities?: CoreAbility[];
   volume?: { kind: 'cylinder'; height: number };
 }
@@ -83,6 +85,7 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  flow?: MatchFlowState;
   schemaVersion: 3;
   id: string;
   round: number;
@@ -105,7 +108,7 @@ export interface GameState {
   setup?: SetupTransaction | null;
   scout?: ScoutMoveTransaction | null;
 }
-export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
+export type FailureReason = 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
   'MODEL_NOT_IN_UNIT' | 'MODEL_DEAD' | 'INVALID_POSITION' | 'EXCEEDS_ALLOWANCE' |
   'OUTSIDE_BATTLEFIELD' | 'BASE_OVERLAP' | 'UNIT_ENGAGED' | 'ENEMY_ENGAGEMENT' | 'INCOHERENT' |
@@ -130,6 +133,7 @@ export type CommandResult<T = undefined> = { ok: true; value: T } | CommandFailu
 export type RangedWeapon = DeepReadonly<Extract<Weapon, { kind: 'ranged' }>>;
 export interface ShootingTransaction {
   unitId: string;
+  selectedTarget?: { weaponId: string; targetUnitId: string };
   firedWeaponIds: string[];
   hasRolled: boolean;
 }
@@ -170,7 +174,7 @@ export type ShootingEvent = EventContext & (
   { type: 'shooting-cancelled' } |
   { type: 'shooting-completed' }
 );
-export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent | TerrainEvent | (EventContext & { type: SetupEventType; method?: string; modelId?: string; reason?: string });
+export type GameEvent = FlowEvent | MovementEvent | ShootingEvent | CloseCombatEvent | TerrainEvent | (EventContext & { type: SetupEventType; method?: string; modelId?: string; reason?: string });
 export interface LegalTarget {
   targetUnitId: string;
   eligibleFiringModelIds: string[];
@@ -179,7 +183,8 @@ export interface LegalTarget {
 }
 
 export type CombatMoveKind = 'charge' | 'pile-in' | 'overrun' | 'consolidate';
-export interface TemporaryEffect { unitId: string; kind: 'FIGHTS_FIRST'; expiresAt: 'END_OF_TURN'; turn: number }
+/** Legacy schema-3 charge effect; migrated when Match Flow is enabled. */
+export interface LegacyCombatEffect { unitId: string; kind: 'FIGHTS_FIRST'; expiresAt: 'END_OF_TURN'; turn: number }
 export interface CombatMove extends MovementTransaction {
   kind: CombatMoveKind;
   targetIds: string[];
@@ -203,7 +208,7 @@ export interface CloseCombatState {
   charge: ChargeAction | null;
   move: CombatMove | null;
   declared: string[];
-  effects: TemporaryEffect[];
+  effects: LegacyCombatEffect[];
   fight: FightPhaseState | null;
 }
 export type CloseCombatEvent = EventContext & (
@@ -247,8 +252,8 @@ export interface VisibilityResult {
   level: VisibilityLevel; hasLineOfSight: boolean; terrainFullyVisible: boolean;
   hidden: boolean; withinDetection: boolean;
 }
-export interface AttackModifier { source: 'COVER' | 'PLUNGING_FIRE'; skillDelta: number }
-export interface ModelAttackModifiers { modelId: string; baseSkill: number; effectiveSkill: number; modifiers: AttackModifier[] }
+export interface AttackModifier { source: 'COVER' | 'PLUNGING_FIRE' | 'TEMPORARY_EFFECT'; skillDelta: number }
+export interface ModelAttackModifiers { modelId: string; hitDelta?: number; woundDelta?: number; saveDelta?: number; baseSkill: number; effectiveSkill: number; modifiers: AttackModifier[] }
 export type TerrainEvent = EventContext & (
   { type: 'model-entered-terrain-area' | 'model-left-terrain-area'; modelId: string; areaId: string } |
   { type: 'model-changed-elevation'; modelId: string; fromZ: number; toZ: number } |

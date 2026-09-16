@@ -319,3 +319,60 @@ The debug screen can render 108 bounded complete-formation samples at the select
 Large bases use the same full-base constraints. When no ordinary edge setup fits, the default rejects; `largeModelEdgeFallback` is a centralized policy hook. Detailed large-model arrival exceptions and their downstream attack/movement restrictions are deferred. No transports, leaders, CP, Rapid Ingress stratagem, mission scoring, objectives, faction rules, army builder, AI or persistent saves are introduced.
 
 Reference: official core-rules sections 20.01–20.04, 24.09, 24.20 and 24.31–24.32 in the PDF linked above, plus the explicit Task 006 rules contract. Thresholds are centralized configuration, not copied rulebook prose or UI conditions.
+
+
+## Match flow, Command and temporary rules (Task 007)
+
+### Ownership and modules
+
+`flow/MatchFlowController.ts` coordinates the existing progression primitive with Command steps, timing windows, effect expiry and match limits. Canonical round/turn/player/phase remain `GameState.round`, `turn`, `activePlayerId`, `phase`; they are not duplicated in another object. `flow.firstPlayerId`, monotonically increasing `phaseIndex`, `commandStep`, pending resolutions, current/queued windows and transition boundary supplement them. Fight's finer steps remain in its existing controller. `maximumBattleRounds` defaults to 5 and `maxExtraCpPerBattleRound` to 1.
+
+`command/CommandController.ts` implements the five Command steps. `BattleShock.ts` owns strength fractions, leadership resolution, recovery and action/retreat gates. `resources/CommandPoints.ts` is the only CP writer. `stratagems/StratagemEngine.ts` validates and resolves definitions; executable extension policies are separate from serialized data. `effects/EffectEngine.ts` supplies shared modifiers, flags, stacking and expiry. None of these modules import React Native.
+
+GameEngine remains the public coordinator: command implementations work on detached drafts and commit only successful results. Expected illegal actions return domain results. Corrupt RNG/policies may throw, without committing partial state. External RNG state cannot be rolled back. Query policies receive copies; trusted effect/ability resolvers receive the transactional draft.
+
+### Phase and Command boundaries
+
+`canAdvancePhase()` returns every blocking reason: open transactions, unresolved Command step, pending mandatory work, windows, unfinished Fight and injected rule blockers. `tryNextTurn()` cannot skip phases in managed mode. The first request to advance a completed phase opens END_OF_PHASE; both players pass; the next request ends it. Fight additionally opens END_OF_TURN after phase expiry. Turn expiry precedes the next player, and round expiry/counter reset occurs only after the second player. Reserve expiration still runs at the same round boundary. The final configured round ends the match and resolves reserve end-battle policy without incrementing into an extra round.
+
+Command uses START_OF_COMMAND_PHASE → GAIN_CORE_CP → BATTLE_SHOCK → COMMAND_ABILITIES → END_OF_COMMAND_PHASE. Entry executes each step once, and advancement cannot skip pending work. Start/end windows expose future triggers. End Command resolves ordinary pending abilities before the separate MISSION_HOOK stage; no mission logic is provided. Optional abilities are enumerable and may resolve once during their matching step. Mandatory ability IDs are persisted in `pending`; callers must supply the matching resolver after loading. Missing resolvers block rather than silently discard obligations.
+
+Timing windows are serialized by ID, trigger, actor, optional unit/target context and passed player IDs. Start-turn/phase/Command windows queue deterministically; only the current window is usable. Both players pass to close it. A successful stratagem clears passes so reactions can be reconsidered. Pass is not cancellation of a committed attack. No query emits events.
+
+The adapters currently open start/end turn and phase, start/end Command, failed Battle-shock, Shooting target selection, completed shooting, completed charge and completed fight windows. AFTER_HIT_ROLL and AFTER_WOUND_ROLL are typed extension points only: the shared attack resolver remains atomic per weapon. Adding a real reroll stratagem will require a resumable attack transaction; this task does not claim mid-roll reactions or implement a reroll catalog.
+
+### CP and Battle-shock
+
+Both players gain one Core CP on entering GAIN_CORE_CP. Core gains bypass the extra allowance. Other gains are capped by remaining per-player allowance and return the granted amount; configurable limits/explicit ignore-limit hooks support future rules. Counts are nonnegative safe integers; costs are validated before subtraction. UI and stratagem resolvers use the resource API.
+
+Half-strength compares living models with immutable starting model count. A one-model unit instead compares remaining with starting wounds. Destroyed and off-field units do not enter the mandatory roll queue. Active-player units that are currently shocked or at/below half strength each receive one pending roll. Per-model optional Leadership overrides permit heterogeneous characteristics; otherwise the catalog value applies. The central resolver rolls two injected D6 and succeeds against any eligible living model's effective Leadership.
+
+Battle-shock is persistent runtime state, preserved by turn resets. Command start does not clear it. Failure sets it; a successful required recovery roll clears it. OC returns `null` to represent the rules' dash instead of changing catalog OC. `canStartAction`/`canCompleteAction` disallow shocked units. `fallBackOptions` forbids Ordered Retreat and indicates Desperate Escape is required. There is no Fall Back or complete Actions controller in Tasks 001–006; this is their centralized integration gate, not a new movement subsystem.
+
+### Stratagem transaction and targeting
+
+Definitions contain labels, cost, phase/trigger/turn ownership, target relation/count/keyword selector, conditions, named restrictions/resolver, usage limits and explicit exceptions. The engine validates timing, exact target IDs, restrictions, resources, Battle-shock and limits before committing CP or effects. A failed/throwing resolver rolls back the whole draft. Usage is recorded per player, target, phase index, turn and round. Defaults enforce once per stratagem per phase and one stratagem targeting a given unit per player per phase. Overrides are explicit definition policies. Battle-shock restricts the controlling player's targeting, not the opponent's.
+
+Technical fixtures are in `stratagems/testStratagems.ts`: offensive BS −1; defensive Save −1; Command OC +1; and shock removal after a failed roll. They are not official content. The debug option enumerator lists singleton target candidates used by these fixtures; multi-target definitions can be validated/submitted as explicit batches without an unbounded combinations search.
+
+Shooting has a serialized `selectedTarget` commitment. `selectShootingTarget` validates the existing visibility/range pipeline and opens the reaction window. `fireWeapon` requires matching commitment and all passes, then revalidates and resolves. This prevents bypassing a defensive effect by retargeting or cancelling after spending enemy CP. Completed attacks remove the commitment, and the next unused profile can select another target. Legacy shooting snapshots retain their old direct-fire API until migration.
+
+### Effects and modifiers
+
+Each effect stores ID, source, unit target, typed modifier/flag payload, creation stamp, expiry owner, duration, stacking and active state. Supported boundaries are current phase/turn/round, start/end of the target owner's next Command phase, or explicit removal. Expiry owner can be supplied explicitly. Next-Command duration requires a later absolute player turn, so an opponent Command does not expire an owner-specific effect. Start-of-next-Command expiry occurs when the queued Command-start window actually becomes active. Effects expire before subsequent stage actions and are retained inactive for debugging.
+
+STACK sums modifiers; REPLACE_SAME_SOURCE deactivates matching source/target/payload effects; NON_STACKING suppresses a later duplicate payload on that target; HIGHEST_ONLY chooses the greatest numeric value (stable first-wins ties) and reevaluates when the winner expires. These are literal numeric policies, not a guess about whether positive or negative is beneficial.
+
+Move is queried by the existing normal movement validator. BS combines with Cover/Plunging Fire; WS, Save, Leadership, OC, Hit and Wound use the shared modifier layer. Skill, save, Leadership and hit/wound bounds are centralized; unmodified natural 1 fails and natural 6 succeeds for hit/wound rolls. Attack metadata records effective skills and roll/save deltas. Unit/weapon catalog data is never mutated. Flag effects support FIGHTS_FIRST and eligibility denials. Managed charges grant FIGHTS_FIRST through this engine; migrated legacy charge effects are converted explicitly.
+
+Movement usage records actual spent distance. In managed snapshots it may legitimately exceed the catalog Move after a buff expires; validation therefore retains finite/nonnegative and transaction displacement checks rather than rejecting historical usage against the unmodified catalog allowance. Current commands always validate remaining movement against the effective characteristic.
+
+### Events, migration and debug
+
+Global temporal/resource events use a discriminated `GameEvent` member `{ type: 'flow', name, detail, ...context }`; `unitId` is empty for genuinely global events. Names cover battle rounds, turns, phases, Command steps, CP, Battle-shock, windows, stratagems and effects. Existing combat/movement events are preserved. Shooting history validation now admits intervening flow events, necessary for reactive defence.
+
+Schema remains 3 through additive `flow`, CP, Leadership and target-commitment fields. Missing `flow` explicitly means legacy Task 001–006 phase behavior; loading does not silently issue CP, reopen windows or replay entry triggers. `enableMatchFlow()` is the explicit migration and rejects an open action or repeat migration. New debug matches always enable it; pre-battle enabling waits until deployment/scouts finish before beginning temporal events. Executable policies and RNG continuation remain caller-owned. New state validates resource bounds, phase index, first player, pending references, window IDs/passes, effect payloads/expiry/timestamps, usage and commitment. Loading is atomic. This remains a trusted typed snapshot loader, not a comprehensive hostile-JSON parser.
+
+`ui/CommandPanel.tsx` shows steps, both CP totals, extra counters, pending rolls/abilities, shock and OC, windows, legal/illegal fixture stratagems, passes and effect expiry. It only issues engine commands. Existing battlefield, terrain, movement, shooting and close-combat screens stay in place. Android/iOS exports validate bundling; no real-device test is claimed.
+
+Rules reference: the official core PDF linked above, sections 01.06–01.07, 08.01–08.05 and 15.01, plus the explicit September-2026 Task 007 contract. The implementation deliberately includes no faction rules, official stratagem catalog, mission scoring, full Actions, transports, attached leaders, AI or persistent saves.

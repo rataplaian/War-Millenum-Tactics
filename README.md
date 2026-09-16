@@ -31,9 +31,24 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 006
+## Current status: Task 007
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
+
+### Command, CP and timing (Task 007)
+
+The debug UI enables Match Flow automatically. Existing schema-3 fixtures remain available in explicit legacy mode for regression testing; callers opt into the new system with `engine.enableMatchFlow()`.
+
+- At each open timing window, both players must **PASS**, or use an available technical stratagem before passing. The panel shows legal options and rejection reasons. Windows block battle commands and phase progression.
+- In Command, use **ADVANCE COMMAND STEP** through Start → Core CP → Battle-shock → Command Abilities → End. Both players gain 1 Core CP. Roll every pending Battle-shock test; mandatory abilities must also resolve. A failed roll opens the test override window.
+- Both players' CP and additional gains are visible. The default extra allowance is 1 CP per player per battle round. Core gains do not consume it.
+- **NEXT PHASE** first opens the end-of-phase window; pass and press again to commit the transition. Fight also opens an end-of-turn window. Direct debug turn skipping is blocked with Match Flow enabled. The default match ends after both players complete round 5; the limit is configurable.
+- Selecting a Shooting target now commits the selection and opens **AFTER_TARGET_SELECTED** before any dice. The opponent may use **TEST REACTIVE DEFENCE**. Pass, then FIRE. A committed selection must resolve; it cannot be cancelled to undo a reaction.
+- The panel shows Battle-shock, effective OC (a dash when shocked), action/retreat eligibility, pending resolutions, active effects and their expiry. Battle-shock persists until a successful required recovery roll or an explicit authorized effect.
+
+Four invented stratagems exercise the framework: offensive BS −1, reactive Save −1, Command OC +1 until the target owner's next Command start, and a failed Battle-shock override. They are **technical fixtures, not official stratagems**. Catalog profiles are never edited. Fights First granted by a charge uses the shared effect system.
+
+Validation: **427 passing tests**, comprising the original 324 unchanged tests and 103 new flow/resource/stratagem/effect/snapshot/integration tests. The full Command → Movement → Shooting → Charge → Fight → next-player path is tested through engine APIs.
 
 ### Try deployment and reserves (Task 006)
 
@@ -43,13 +58,13 @@ The default **DEPLOYMENT** scenario contains six invented archetypes per player:
 2. Choose the first-turn player, then advance to DEPLOY_ARMIES. The engine identifies the next deployment player. Select normal/Infiltrators deployment, tap a formation anchor or enter exact x/y/z; individual model controls also work. Confirm or cancel.
 3. After every pending unit is deployed, advance to PRE_BATTLE_RULES. Resolve or skip Scouts for the first-turn player, then the other player. Scouts in Strategic Reserves can instead set up in their own deployment zone. Advance again to start the battle.
 4. During Movement, eligible reserve units can choose **STRATEGIC EDGE** or **DEEP STRIKE**. Standard arrival starts in round 2. Preview, edit and confirm the whole formation. Green/red debug samples are optional hints, not a grid or an exhaustive legal-position map.
-5. **DEBUG: NEXT PLAYER TURN** advances through engine progression, including round boundaries and reserve expiration. It rejects unfinished actions. Use it twice to reach the next round with the same active player. Reposition and end-battle debug buttons exercise the generic rule hooks.
+5. Progress through the Command steps, phases and timing windows to reach later rounds. **DEBUG: NEXT PLAYER TURN** cannot bypass these mandatory steps in Task 007. Reposition and end-battle debug buttons exercise the generic rule hooks.
 
 Initial Strategic Reserves are limited to 50% of the configured battle points limit per player. Fortifications are excluded. Setup uses horizontal enemy distances, full-base bounds/support, collision and coherency. Arrivals record method/turn and block other move types until the next Charge phase. Unarrived initial Strategic Reserves expire after round 3; repositioned units are exempt from that deadline. End-battle resolution applies separately.
 
 ### Try the debug movement screen
 
-1. Choose a terrain scenario, tap **START TEST BATTLE**, then **NEXT PHASE** to enter Movement.
+1. Choose a terrain scenario, tap **START TEST BATTLE**, complete the Command steps and timing windows, then use **NEXT PHASE** to enter Movement.
 2. Tap **SELECT UNIT** for the active player's unit, then a numbered model button (or tap its circle).
 3. Tap the battlefield to choose a destination. A legal move updates the model; a rejected move displays the reason and leaves state unchanged. Each accepted segment consumes that model's allowance.
 4. Move the other models as needed, then **COMPLETE MOVE**. The final unit formation must satisfy configured coherency.
@@ -60,9 +75,9 @@ The terrain debug field is a configurable 40″ × 30″ prototype; earlier fixt
 ### Try shooting
 
 1. Advance to **Shooting** after completing or cancelling any movement action.
-2. Use **SHOOT: [unit]**, select an available ranged weapon and one of the engine's legal targets, then **FIRE**.
+2. Use **SHOOT: [unit]**, select an available ranged weapon and one of the engine's legal targets; resolve/pass the target-selection reaction window, then **FIRE**.
 3. Read the battle log: attacks, hits, wounds, failed saves, actual damage and casualties. Dead circles are hidden; unit cards retain health/model counts.
-4. Use **COMPLETE SHOOTING** to finish. **CANCEL SHOOTING** is available only before any dice have been rolled.
+4. Use **COMPLETE SHOOTING** to finish. **CANCEL SHOOTING** is available before target commitment or any dice have been rolled.
 
 Both invented factions have ranged weapons. The engine supports one use per profile and different targets for different profiles. It checks three-dimensional base-edge range and the modular primitive-volume Visibility Engine, then resolves attacks → hits → wounds → armour saves → damage with an explicit RNG. The debug battle uses seed 42 for repeatable results. The scenario picker supplies clear, partial, blocked, Obscuring, Hidden, Plunging Fire and vertical-movement examples.
 
@@ -96,8 +111,8 @@ Snapshots remain schema 3: optional terrain, deployment/reserve transactions, lo
 
 Generic RESERVES require an explicit arrival policy. Oversized bases that cannot fit an edge constraint are rejected unless a setup policy supplies a fallback; no transport gameplay is implemented. Off-field positions are retained as inert history and never participate in battlefield queries.
 
-No Advance/Fall Back actions, faction rules, complete weapon keyword pack, invulnerable saves, Feel No Pain, transports, reserves, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
+No Advance/Fall Back actions, complete Actions system, official stratagem catalog, faction rules, complete weapon keyword pack, invulnerable saves, Feel No Pain, transports, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Battle-shock supplies a shared Ordered Retreat/Desperate Escape eligibility hook; it does not add the absent Fall Back movement controller. Hit/wound timing identifiers are extension points; individual attack rolls still resolve atomically and do not offer reroll interruptions. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 
-GitHub is the primary versioned copy. Later clone it into a local development folder; keep both synchronized with normal git pull/commit/push. Work on feature branches and review pull requests before merging into main.
+Development workflow: Codex cloud workspace → GitHub feature branch → pull request → CI → review. No operation on the user’s PC is required. Merge into main only after explicit authorization.

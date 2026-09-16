@@ -1,3 +1,4 @@
+import { applyEffect } from '../effects/EffectEngine';
 import { battleStarted, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CommandResult, CombatMoveKind, CloseCombatEvent, GameState, MovementPath, Position, Unit, WeaponResolution } from '../models';
@@ -136,7 +137,8 @@ export class CloseCombatController {
     this.combat.move = null;
     if (move.kind === 'charge') {
       unit.state.hasCharged = true;
-      this.combat.effects.push({ unitId: unit.id, kind: 'FIGHTS_FIRST', expiresAt: 'END_OF_TURN', turn: this.state.turn });
+      if (this.state.flow) applyEffect(this.state, { source: 'charge', target: { unitId: unit.id }, payload: { kind: 'FLAG', flag: 'FIGHTS_FIRST', value: true }, expiry: 'END_OF_CURRENT_TURN', stacking: 'NON_STACKING' });
+      else this.combat.effects.push({ unitId: unit.id, kind: 'FIGHTS_FIRST', expiresAt: 'END_OF_TURN', turn: this.state.turn });
       this.combat.charge = null;
     } else if (move.kind === 'pile-in') this.combat.fight!.pileInDone.push(unit.id);
     else if (move.kind === 'overrun') this.combat.fight!.selected!.overrunDone = true;
@@ -244,7 +246,7 @@ export class CloseCombatController {
     if (weapon.kind !== 'melee') return failure('WEAPON_NOT_MELEE');
     const models = getModelsEligibleToFight(this.state, unit, target).filter(m => !selected.usedModelIds.includes(m.id));
     if (!models.length) return failure('NO_ELIGIBLE_FIGHTERS');
-    const result = resolveCombat(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, allocation);
+    const result = resolveCombat(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, allocation, [], this.state);
     this.state.units = this.state.units.map(u => u.id === target.id ? result.target : u);
     selected.usedModelIds.push(...models.map(m => m.id)); selected.hasRolled = true;
     this.emit(unit.id, { type: 'melee-attack-started', weaponId, targetUnitId });

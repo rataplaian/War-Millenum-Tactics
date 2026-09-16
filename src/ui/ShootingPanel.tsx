@@ -31,26 +31,27 @@ export function ShootingPanel({ state, engine, rng, report }: Props) {
     {action && <>
       <Text style={textStyle}>Firing unit: {state.definitions.find(d => d.id === state.units.find(u => u.id === action.unitId)!.definitionId)!.name}</Text>
       {weapons?.ok && weapons.value.map(weapon => <Button key={weapon.id}
-        title={`${weaponId === weapon.id ? 'SELECTED: ' : ''}${weapon.name} · ${weapon.range}″`}
+        title={`${weaponId === weapon.id ? 'SELECTED: ' : ''}${weapon.name} · ${weapon.range}″`} disabled={!!action.selectedTarget}
         onPress={() => { setWeaponId(weapon.id); setTargetId(null); }} />)}
       {weapons?.ok && !weapons.value.length && <Text style={textStyle}>All ranged profiles used. Complete shooting.</Text>}
       {targets?.ok && targets.value.map(target => {
         const unit = state.units.find(u => u.id === target.targetUnitId)!;
         const name = state.definitions.find(d => d.id === unit.definitionId)!.name;
         return <View key={unit.id} style={{ gap: 4 }}>
-          <Button title={`${targetId === unit.id ? 'SELECTED TARGET: ' : 'TARGET: '}${name}`} onPress={() => setTargetId(unit.id)} />
+          <Button title={`${targetId === unit.id ? 'SELECTED TARGET: ' : 'TARGET: '}${name}`} disabled={!!action.selectedTarget} onPress={() => { setTargetId(unit.id); if (state.flow) report(engine.selectShootingTarget(weaponId!, unit.id), 'Target selected. Resolve reaction window before FIRE.'); }} />
           <Text style={textStyle}>{target.eligibleFiringModelIds.length} eligible firing models · nearest {target.nearestDistance.toFixed(2)}″</Text>
         </View>;
       })}
       {targets?.ok && !targets.value.length && <Text style={textStyle}>No legal targets for this weapon.</Text>}
-      <Button title="FIRE" disabled={!weaponAvailable || !targetAvailable} onPress={() => {
+      <Button title="FIRE" disabled={!weaponAvailable || !targetAvailable || !!state.flow?.window} onPress={() => {
         if (!weaponId || !targetId) return;
         const result = engine.fireWeapon(weaponId, targetId, rng);
         report(result, 'Weapon resolved. See the battle log below.');
         if (result.ok) clear();
       }} />
       <Button title="COMPLETE SHOOTING" onPress={() => { const result = engine.completeShooting(); report(result, 'Shooting completed.'); if (result.ok) clear(); }} />
-      <Button title="CANCEL SHOOTING" disabled={action.hasRolled} onPress={() => { const result = engine.cancelShooting(); report(result, 'Shooting cancelled.'); if (result.ok) clear(); }} />
+      <Button title="CANCEL SHOOTING" disabled={action.hasRolled || !!action.selectedTarget} onPress={() => { const result = engine.cancelShooting(); report(result, 'Shooting cancelled.'); if (result.ok) clear(); }} />
+      {action.selectedTarget && <Text style={textStyle}>Target committed. Resolve the reaction window, then FIRE.</Text>}
       {action.hasRolled && <Text style={textStyle}>Dice have been rolled: cancellation is no longer available.</Text>}
     </>}
   </View>;

@@ -1,6 +1,6 @@
 # War Millennium Tactics
 
-Continuous tabletop movement prototype for a local, single-player, turn-based tabletop tactical game for Android and iOS. The first prototype uses one **placeholder** Aeldari unit and one **placeholder** Emperor’s Children unit. All fixture statistics/equipment are invented test data, not official datasheets.
+Continuous tabletop movement and combat prototype for a local, single-player, turn-based tabletop tactical game for Android and iOS. The first prototype uses one **placeholder** Aeldari unit and one **placeholder** Emperor’s Children unit. All fixture statistics/equipment are invented test data, not official datasheets.
 
 ## Stack
 
@@ -31,7 +31,7 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 003
+## Current status: Task 004
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 
@@ -54,11 +54,23 @@ The field is a configurable 30″ × 24″ prototype. Both factions and all spat
 
 Both invented factions have ranged weapons. The engine supports one use per profile and different targets for different profiles. It checks base-edge range and basic centre-ray LOS, then resolves attacks → hits → wounds → armour saves → damage with an explicit RNG. The debug battle uses seed 42 for repeatable results. Default battlefield: no LOS blockers; rectangular blocker cases are tested separately.
 
+### Try charge and fight
+
+The debug scenario starts the units closer together and uses **2-inch engagement**. Both units have invented melee equipment. Older engine fixtures retain their original deployment and configurable 1-inch engagement.
+
+1. Advance through Movement and Shooting to **Charge**. Select **CHARGE: [unit]** to roll 2D6, then choose legal target(s) and **CONFIRM CHARGE TARGETS**.
+2. Tap a charging model and a destination. Move each model closer to the selected targets; **COMPLETE COMBAT MOVE** checks the whole formation. Failed completion leaves positions editable. **RESOLVE AS FAILED CHARGE** restores starting positions but consumes this charge attempt; it never refunds the roll.
+3. Enter Fight, **START FIGHT PHASE**, then **NEXT FIGHT STEP**. Resolve or explicitly pass each unit's Pile In, active player's units first.
+4. Enter the Fight step, select an eligible unit, choose its melee weapon/target, resolve attacks and **COMPLETE FIGHT UNIT**. Selection order and Fights First come from the engine. Unengaged eligible units can use **OVERRUN PILE IN** with a new target.
+5. After all fights, enter Consolidate. Resolve or pass each eligible unit's movement, then reach END and **NEXT PHASE**. Fresh enemies engaged by consolidation get an intervening fight opportunity.
+
+Pile In and Consolidation can be cancelled before completion; fight selection can be cancelled before rolling or completing an Overrun. Model positions, movement usage, casualties and logs are engine-owned. The separate Fight selector may be the opponent, even though the main turn remains the active player's.
+
 ### Scope and limits
 
-Collision checks only the final base position, not the path. No full terrain, vertical movement, melee, charge rolls, Advance, Fall Back, transports, Deep Strike, AI, army building, missions, objectives, multiplayer, backend or polished art. No drag or zoom yet.
+Collision checks only the final base position, not the path. Charge target queries search for a complete legal formation, using a bounded deterministic search (10,000 formation nodes; 256 target combinations). They may conservatively omit legal crowded formations or movement orderings outside that search. This is a tested prototype rules subset, not a claim of complete 11th-edition rules compliance. No full terrain, vertical movement, Advance, Fall Back, transports, Deep Strike, AI, army building, missions, objectives, multiplayer, backend or polished art. No drag or zoom yet.
 
-Snapshots use schema version 3 and can restore an in-progress movement transaction in memory. Schema-1 and schema-2 snapshots are explicitly rejected. Ranged loadouts are homogeneous, wound allocation is automatic and LOS is only a replaceable 2D rectangle policy. No weapon special rules, cover, invulnerable saves or Feel No Pain. RNG continuation is caller-owned and is not stored in snapshots. There is no disk save, replay executor or full untrusted-JSON parser; restarting the app resets the battle. Mobile export is not a real-device test or APK/IPA build.
+Snapshots use schema version 3 with an optional closeCombat extension. Unmodified Task 003 snapshots remain loadable; open charge/fight/movement actions can be restored in memory. Schema-1 and schema-2 snapshots are explicitly rejected. Ranged loadouts are homogeneous, wound allocation is automatic and LOS is only a replaceable 2D rectangle policy. No weapon special rules, cover, invulnerable saves or Feel No Pain. RNG continuation is caller-owned and is not stored in snapshots. There is no disk save, replay executor or full untrusted-JSON parser; restarting the app resets the battle. Mobile export is not a real-device test or APK/IPA build.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 

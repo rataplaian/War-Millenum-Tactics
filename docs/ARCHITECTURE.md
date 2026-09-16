@@ -1,4 +1,4 @@
-# Architecture — Task 003
+# Architecture — Task 004
 
 ## Dependency boundary and folders
 
@@ -59,7 +59,7 @@ Temporary incoherency while repositioning individual models is permitted; endpoi
 
 Only final positions are checked. A segment may currently cross a friendly model, enemy model or engagement area when its destination is clear. Add intermediate/path validation before endpoint validation when those rules are implemented. No terrain, swept collision or pathfinding is implied by the current API.
 
-`SpatialRules.engagementDistance` is an inclusive edge-to-edge threshold. `enemyModelsWithinEngagement` returns nearby living enemies; `isUnitEngaged` checks living models in a unit. The prototype also rejects normal-move destinations inside this threshold. These are spatial queries and a normal-move guard only: no charge, Fall Back, melee, reactions or engagement-turn rules exist.
+`SpatialRules.engagementDistance` is an inclusive edge-to-edge threshold. `enemyModelsWithinEngagement` returns nearby living enemies; `isUnitEngaged` checks living models in a unit. The prototype also rejects normal-move destinations inside this threshold. Task 004 reuses these spatial queries for charge and melee. Fall Back and reaction rules remain absent.
 
 ## Configurable coherency
 
@@ -91,7 +91,7 @@ The debug screen distinguishes players by colour and labels, allows friendly uni
 
 ## Future extensions
 
-Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. No charges, melee, terrain, vertical movement, Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer or backend are included.
+Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. No terrain, vertical movement, Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer or backend are included.
 
 
 ## Shooting subsystem (Task 003)
@@ -105,7 +105,7 @@ New modules:
 - `rules/weaponValues.ts`: validation and fixed/dice value resolution using existing D6 utilities.
 - `rules/combatRolls.ts`: hit thresholds, strength/toughness wound targets and signed-AP saves.
 - `rules/damageAllocation.ts`: pure prototype allocation and damage application.
-- `rules/resolveShooting.ts`: sequential combat orchestration, returning updated target data and a serializable resolution.
+- `rules/resolveShooting.ts`: backward-compatible entry point delegating to the shared `resolveCombat.ts` pipeline.
 - `engine/validateShootingState.ts`: blocker, event-reference and shooting-transaction integrity checks.
 - `ui/ShootingPanel.tsx` and `ui/BattleLog.tsx`: legal choices from the engine and summaries from events.
 
@@ -145,3 +145,58 @@ If the unit is destroyed, stop further hit/wound/save/damage rolls. `attacks` re
 GameEvent preserves all movement variants and adds shooting-started, weapon-fired, model-damaged, model-destroyed, shooting-cancelled and shooting-completed. Every event uses deterministic sequence/round/turn/player/unit context. weapon-fired includes eligible model IDs, per-model attack rolls/counts, hit/wound rolls, saves, damage rolls, applied/excess damage and casualty IDs. It is followed by ordered damage/casualty detail events. The UI consumes these events directly; it does not recalculate combat outcomes. This remains a lightweight debug history, not event sourcing or a complete replay executor.
 
 Weapon traits remain inert data. Future attack-count/hit/wound/save stages can add weapon modifiers, Torrent, Rapid Fire, Sustained/Lethal Hits, Devastating Wounds, rerolls, invulnerable saves and Feel No Pain without moving rules into UI. Eligibility and visibility policies are the extension points for Pistols, Indirect Fire, detection and reaction shooting; allocation is the seam for Precision, attachments and player choice. None of those mechanics is implemented here.
+
+
+## Charge and Fight subsystem (Task 004)
+
+### Contracts and compatibility
+
+`GameState.closeCombat` is an optional, serializable extension to schema 3. Missing means no charge, no fight controller and no temporary effects; old Task 003 snapshots remain unchanged when loaded. The first combat command initializes the extension. No migration of catalog or model coordinates is necessary. `validateCloseCombatState` checks transaction ownership, phase, roll totals, references, movement usage and original positions before load replaces state. As before, loading accepts trusted typed snapshots, not arbitrary hostile JSON.
+
+`UnitState.hasAdvanced` and `hasFallenBack` are optional eligibility flags for future movement commands, not implementations of Advance/Fall Back. `canDeclareCharge` centralizes eligibility; a generic injected `chargeExceptions` policy may grant permissions. No faction names occur in those rules. Temporary `FIGHTS_FIRST` effects reference a unit and expire at END_OF_TURN; future ability evaluation can supply the same effect contract. Turn progression clears the close-combat action state and effects.
+
+### Engine boundaries and transactions
+
+`GameEngine` exposes declareCharge, selectChargeTargets, failCharge, moveCombatModel, previewCombatMove, completeCombatMove, cancelCombatMove, startFightPhase, advanceFightStep, beginPileIn, beginOverrun, beginConsolidation, skipTacticalMove, selectFightUnit, meleeAttack, cancelFightUnit and completeFightUnit.
+
+`CloseCombatController` operates on a detached draft. Only a successful command replaces the engine state. Illegal commands consume no RNG; unexpected RNG/allocation errors throw without committing partial state. External RNG continuation remains caller-owned. There is no UI coordinate mutation, duplicate geometry library, or React dependency in the engine.
+
+CombatMove extends the original MovementTransaction shape with kind, targets, allowance and a separate per-model cumulative usage map. Normal movement usage is preserved. Accepted segments consume distance even if the player later changes direction. Endpoint collision and bounds call the same `validateFinalPosition` function; the explicit engagement permission is only used by close-combat movement. Coherency is checked at completion so models may temporarily lose formation during repositioning.
+
+Pile In and Consolidation cancellation restore positions and normal movement usage exactly. An unfinished Overrun movement can also be cancelled without cancelling the selected fight. Charge declaration and rolling are one atomic command: after the roll, cancellation is unavailable. `failCharge` restores any draft charge positions but leaves the declaration consumed and its dice events intact. This resolves failure without allowing rerolls. Completed movement cannot be undone globally. A selected fight can be cancelled before dice or a completed Overrun, restoring the selector/category; after that it must be completed.
+
+### Charge geometry and feasibility
+
+The charge roll is two injected D6. Selection occurs afterwards and checks enemy ownership, 12-inch declaration distance, rolled distance and a full formation witness. Multi-target sets are validated together, including engagement with every selected target and no unselected enemy. Charge movement is limited per model by the roll. Each model ends closer to a selected target; completion enforces the one-inch/engagement endpoint priorities where a legal placement is available.
+
+`reachablePositions` builds candidate endpoints from circle intersections, circle projections, and battlefield boundaries using the existing geometry utilities. It has no screen sampling, grid or pixel tolerance. Endpoint feasibility does not imply clear intermediate movement: as with Task 002, swept collision, terrain and paths are outside this task.
+
+`findChargeFormation` searches candidate endpoints in deterministic model order and validates the whole witness against coherency, engagement and priority constraints. It examines at most 10,000 search nodes; target queries examine at most 256 target combinations. This is deliberately conservative: complex formations requiring other model orders or endpoints not represented by this candidate search may be omitted. Selection revalidates the requested exact target set. Final movement completion remains authoritative and does not rely on the search witness being followed by the player.
+
+Endpoint priority checks use the current positions of the other models and do not solve hypothetical coordinated rearrangements for every individual move. This and the bounded formation search are explicit prototype limitations. No optimal path or complete tabletop legality solver is claimed.
+
+### Fight sequencing and movement
+
+FightPhaseState explicitly records START, PILE_IN, FIGHT, CONSOLIDATE and END, plus pile-in opportunities consumed, units eligible/engaged at the start of the Fight step, units that fought, consolidation opportunities consumed and the selected unit's used models. The player must resolve or explicitly pass each optional movement opportunity before advancing its step. Normal pile-ins run for all active-player units before the opponent's; attacks cannot start while those opportunities remain.
+
+The pure `FightSequenceController` prioritizes FIGHTS_FIRST and alternates selectors, skipping an empty side. Its next selector carries into REMAINING_COMBATS; it does not reset at the category boundary. Future effects can supply Fights First without a charge. Already-fought and destroyed units are excluded. Phase/turn commands reject unfinished combat work.
+
+Pile In and Overrun use a three-inch allowance. Engaged units automatically target their currently engaged enemies; an unengaged unit selects enemies within the centralized five-inch pile-in target limit. Moved models must approach a closest original target; base-contact models are locked. Completion preserves each model's existing enemy-unit engagements and checks coherency and a final engaged unit.
+
+Eligibility at the start of the Fight step survives the destruction of an enemy. Such an unengaged unit can select an Overrun, make one extra pile-in and attack if it reaches a target. If no legal target remains, it can complete its activation without attacks. Units first engaged during the Fight step can also use the Overrun pathway. Selection consumes the unit's fight only on completion; no model attacks twice in an activation.
+
+Consolidation uses the same transaction and three-inch endpoint rules after combat. Active player's units resolve before the opponent's. Engaged units preserve engagements; unengaged units select enemies within three inches and must finish engaged with all selected targets. Each unit consolidates at most once in this prototype. Freshly engaged unfought enemies receive a fight opportunity before consolidation continues. Objective-directed destinations are deliberately absent; adding them should extend the consolidation target policy rather than place objective logic in the UI.
+
+### Shared melee resolution and events
+
+Weapon's existing discriminant remains `ranged` or `melee`; melee range is null, and skill is WS for melee / BS for shooting. `getModelsEligibleToFight` checks each living model's base-edge distance to the selected enemy. A unit-level engagement flag does not generate attacks for distant models. The Task 004 fixture uses two-inch engagement; all spatial subsystems use the same configured threshold in a match.
+
+`resolveCombat` is the single Attacks → Hit → Wound → Save → Damage → Casualties pipeline. `resolveShooting` re-exports it for backward compatibility. No wound, save, allocation, dice or damage algorithms were duplicated. Melee resolves all unused eligible models with the selected profile and marks those models used; heterogeneous equipment, extra-attack traits and per-model weapon splitting are future work.
+
+Events extend GameEvent with charge-declared, charge-rolled, charge-target-selected, charge-failed, combat-move-started/completed/cancelled, combat-model-moved, fight-unit-selected/completed/cancelled, overrun-fight, melee-attack-started and melee-attack-resolved. The `kind` on combat-move events distinguishes charge, pile-in, overrun and consolidate. Melee resolution includes the same dice, wounds, damage and casualty records as shooting. Event playerId is the actual acting unit owner, which may differ from the turn owner during Fight. Events remain an append-only debugging foundation, not a replay executor.
+
+### Debug UI and rules references
+
+`CloseCombatPanel` renders engine choices/results and calls commands. `GameScreen` routes circle taps and world-coordinate destinations to the active transaction; `coordinates.ts` is unchanged. `BattleLog` reads either shooting or melee resolutions. `closeCombatPrototype.ts` supplies the close deployment, two-inch engagement and invented melee equipment; the original fixtures remain usable by previous tests.
+
+The user-specified sequencing was cross-checked against the official [combat changes overview](https://www.warhammer-community.com/en-gb/articles/m3son4il/new40k-combat-changes-shake-up-fighting-in-the-new-edition/), including two-inch engagement, post-roll target selection and Fight ordering. The project implements a documented subset, not a complete or licensed rules database. No official datasheets or rulebook passages are copied.

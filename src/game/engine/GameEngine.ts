@@ -1,7 +1,9 @@
+import { CloseCombatController } from './CloseCombatController';
+import { getLegalChargeTargets, type ChargeExceptions } from '../rules/closeCombat';
 import type { CommandResult, GameState, GameEvent, Position, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
-import { checkCoherency } from '../rules/spatial';
+import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
 import { availableRangedWeapons, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
 import { definitionFor } from '../rules/movement';
@@ -9,7 +11,7 @@ import { basicLineOfSight, type VisibilityPolicy } from '../rules/visibility';
 import { allocateDamage, type DamageAllocationPolicy } from '../rules/damageAllocation';
 import { resolveShooting } from '../rules/resolveShooting';
 import type { RandomSource } from '../utils/dice';
-export interface EnginePolicies { visibility?: VisibilityPolicy; damageAllocation?: DamageAllocationPolicy }
+export interface EnginePolicies { visibility?: VisibilityPolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 type EventPayload = GameEvent extends infer E ? E extends GameEvent ?
@@ -38,6 +40,9 @@ export class GameEngine {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (this.state.movement) return failure('MOVEMENT_IN_PROGRESS');
     if (this.state.shooting) return failure('SHOOTING_IN_PROGRESS');
+    if (this.state.closeCombat?.charge || this.state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
+    if (this.state.phase === 'Fight' && this.state.closeCombat?.fight && this.state.closeCombat.fight.step !== 'END') return failure('WRONG_FIGHT_STEP');
+    if (this.state.phase === 'Fight' && !this.state.closeCombat?.fight && this.state.units.some(u => u.state.hasCharged || isUnitEngaged(this.state, u))) return failure('WRONG_FIGHT_STEP');
     this.state = transition(this.state);
     return { ok: true, value: this.getState() };
   }
@@ -159,5 +164,38 @@ export class GameEngine {
     this.event(unitId, { type: 'shooting-completed' });
     return { ok: true, value: undefined };
   }
+
+  private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
+    const draft = this.getState();
+    const result = command(new CloseCombatController(draft));
+    if (result.ok) this.state = draft;
+    return copy(result);
+  }
+  declareCharge(unitId: string, rng: RandomSource) {
+    return this.combatCommand(c => c.declareCharge(unitId, rng, this.policies.chargeExceptions?.(this.getState(), unitId)));
+  }
+  getLegalChargeTargets() {
+    const charge = this.state.closeCombat?.charge;
+    if (!charge || this.state.closeCombat?.move) return [];
+    return copy(getLegalChargeTargets(this.state, this.state.units.find(u => u.id === charge.unitId)!, charge.distance));
+  }
+  selectChargeTargets(ids: string[]) { return this.combatCommand(c => c.selectChargeTargets(ids)); }
+  failCharge() { return this.combatCommand(c => c.failCharge()); }
+  moveCombatModel(id: string, position: Position) { return this.combatCommand(c => c.moveCombatModel(id, position)); }
+  previewCombatMove(id: string, position: Position) { return new CloseCombatController(this.getState()).moveCombatModel(id, position); }
+  completeCombatMove() { return this.combatCommand(c => c.completeCombatMove()); }
+  cancelCombatMove() { return this.combatCommand(c => c.cancelCombatMove()); }
+  startFightPhase() { return this.combatCommand(c => c.startFightPhase()); }
+  advanceFightStep() { return this.combatCommand(c => c.advanceFightStep()); }
+  beginPileIn(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginPileIn(id, targets)); }
+  beginConsolidation(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginConsolidation(id, targets)); }
+  skipTacticalMove(id: string) { return this.combatCommand(c => c.skipTacticalMove(id)); }
+  selectFightUnit(id: string) { return this.combatCommand(c => c.selectFightUnit(id)); }
+  beginOverrun(targets: string[]) { return this.combatCommand(c => c.beginOverrun(targets)); }
+  meleeAttack(weaponId: string, targetId: string, rng: RandomSource) {
+    return this.combatCommand(c => c.meleeAttack(weaponId, targetId, rng, this.policies.damageAllocation));
+  }
+  cancelFightUnit() { return this.combatCommand(c => c.cancelFightUnit()); }
+  completeFightUnit() { return this.combatCommand(c => c.completeFightUnit()); }
 
 }

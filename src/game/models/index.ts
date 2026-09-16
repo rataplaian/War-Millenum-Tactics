@@ -2,7 +2,8 @@ export type FactionId = string;
 export type PlayerId = string;
 export type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };
 /** Continuous inches; origin is the top-left, x right, y down. */
-export interface Position { x: number; y: number }
+export interface Position { x: number; y: number; /** Legacy omission means ground level. */ z?: number }
+export interface Position3 extends Position { z: number }
 export interface LosBlocker {
   id: string;
   kind: 'rectangle';
@@ -11,7 +12,7 @@ export interface LosBlocker {
   height: number;
   opaque: boolean;
 }
-export interface Battlefield { width: number; height: number; losBlockers: LosBlocker[] }
+export interface Battlefield { width: number; height: number; losBlockers: LosBlocker[]; terrain?: TerrainData }
 export type BattlefieldDimensions = Pick<Battlefield, 'width' | 'height'>;
 /** Extend this discriminated union for hulls later. Radius is derived, never stored. */
 export type BaseGeometry = { kind: 'circle'; diameterMm: number };
@@ -25,6 +26,7 @@ export interface Model {
   alive: boolean;
   base: BaseGeometry;
   movementUsed: number;
+  volume?: { kind: 'cylinder'; height: number };
 }
 export type DiceValue = { kind: 'fixed'; value: number } | { kind: 'dice'; count: number; sides: 6; modifier: number };
 export interface WeaponTrait { id: string; value?: number }
@@ -49,6 +51,8 @@ export interface Unit {
   playerId: PlayerId;
   models: Model[];
   state: UnitState;
+  /** Absolute player-turn index; deliberately not reset with action flags. */
+  lastRangedAttackTurnIndex?: number;
 }
 export interface CoherencyRule {
   maxEdgeDistance: number;
@@ -102,7 +106,7 @@ export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' 
   'COMBAT_IN_PROGRESS' | 'CHARGE_INELIGIBLE' | 'ALREADY_DECLARED' | 'NO_CHARGE' | 'TARGETS_REQUIRED' |
   'UNREACHABLE_TARGET' | 'IRREVERSIBLE_ACTION' | 'NO_COMBAT_MOVE' | 'NOT_CLOSER' | 'MUST_ENGAGE' |
   'BASE_CONTACT_LOCKED' | 'INVALID_FINAL_ENGAGEMENT' | 'WRONG_FIGHT_STEP' | 'WRONG_FIGHT_PLAYER' |
-  'UNIT_NOT_ELIGIBLE' | 'NO_FIGHT_SELECTED' | 'WEAPON_NOT_MELEE' | 'NO_ELIGIBLE_FIGHTERS';
+  'UNIT_NOT_ELIGIBLE' | 'NO_FIGHT_SELECTED' | 'WEAPON_NOT_MELEE' | 'NO_ELIGIBLE_FIGHTERS' | 'TERRAIN_BLOCKED' | 'UNSUPPORTED_SURFACE' | 'SURFACE_NOT_ALLOWED' | 'BASE_OVERHANG' | 'INVALID_MOVEMENT_PATH' | 'CLIMB_TOO_FAR' | 'INVALID_TERRAIN';
 export interface CommandFailure {
   ok: false;
   reason: FailureReason;
@@ -136,6 +140,7 @@ export interface WeaponResolution {
   eligibleFiringModelIds: string[];
   attackCounts: { modelId: string; resolved: DiceResolution }[];
   attacks: number;
+  attackModifiers?: ModelAttackModifiers[];
   hitRolls: number[];
   hits: number;
   woundTarget: number;
@@ -155,7 +160,7 @@ export type ShootingEvent = EventContext & (
   { type: 'shooting-cancelled' } |
   { type: 'shooting-completed' }
 );
-export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent;
+export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent | TerrainEvent;
 export interface LegalTarget {
   targetUnitId: string;
   eligibleFiringModelIds: string[];
@@ -202,4 +207,41 @@ export type CloseCombatEvent = EventContext & (
   { type: 'fight-unit-selected' | 'fight-unit-completed' | 'fight-unit-cancelled' | 'overrun-fight' } |
   { type: 'melee-attack-started'; weaponId: string; targetUnitId: string } |
   { type: 'melee-attack-resolved'; resolution: WeaponResolution }
+);
+
+
+/** Simple polygon, no holes, world inches. */
+export interface Polygon { vertices: Position[] }
+export type TerrainCategory = 'EXPOSED' | 'LIGHT' | 'DENSE';
+export interface TerrainArea {
+  id: string; footprint: Polygon; featureIds: string[];
+  metadata: Record<string, string | number | boolean>;
+}
+export interface TerrainPrism { footprint: Polygon; minZ: number; maxZ: number }
+export interface TerrainSurface { id: string; footprint: Polygon; z: number; stable: boolean }
+export interface TerrainFeature {
+  id: string; terrainAreaId: string; footprint: Polygon; height: number;
+  category: TerrainCategory;
+  /** Solid sections and opening volumes allow low walls, floors and windows. */
+  sections: TerrainPrism[]; openings: TerrainPrism[]; surfaces: TerrainSurface[];
+}
+export interface TerrainRules {
+  detectionRange: number; solidHeight: number; stepOverHeight: number; climbProximity: number;
+  plungingHeight: number; toweringRange: number;
+}
+export interface TerrainData { areas: TerrainArea[]; features: TerrainFeature[]; rules?: Partial<TerrainRules> }
+export interface MovementPath { waypoints: Position[] }
+export interface MovementDistance { horizontal: number; vertical: number; totalMovementDistance: number }
+export type VisibilityLevel = 'NOT_VISIBLE' | 'VISIBLE' | 'FULLY_VISIBLE';
+export interface VisibilityResult {
+  level: VisibilityLevel; hasLineOfSight: boolean; terrainFullyVisible: boolean;
+  hidden: boolean; withinDetection: boolean;
+}
+export interface AttackModifier { source: 'COVER' | 'PLUNGING_FIRE'; skillDelta: number }
+export interface ModelAttackModifiers { modelId: string; baseSkill: number; effectiveSkill: number; modifiers: AttackModifier[] }
+export type TerrainEvent = EventContext & (
+  { type: 'model-entered-terrain-area' | 'model-left-terrain-area'; modelId: string; areaId: string } |
+  { type: 'model-changed-elevation'; modelId: string; fromZ: number; toZ: number } |
+  { type: 'hidden-gained' | 'hidden-lost'; modelId: string } |
+  { type: 'cover-applied' | 'plunging-fire-applied'; modelId: string; targetUnitId: string; effectiveSkill: number }
 );

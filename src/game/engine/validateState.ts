@@ -1,3 +1,5 @@
+import { modelsOverlap } from '../terrain/geometry';
+import { validateTerrainState } from './validateTerrainState';
 import { validateCloseCombatState } from './validateCloseCombatState';
 import { PHASES, type GameState } from '../models';
 import { baseInsideBattlefield, basesOverlap, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
@@ -51,7 +53,7 @@ export function validateState(state: GameState): void {
     }
   }
   const living = state.units.flatMap(u => u.models).filter(m => m.alive);
-  if (living.some((a, i) => living.slice(i + 1).some(b => basesOverlap(a, b)))) throw new Error('Overlapping live bases');
+  if (living.some((a, i) => living.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping live bases');
   if (state.movement) {
     const unit = state.units.find(u => u.id === state.movement!.unitId);
     if (!unit || state.phase !== 'Movement' || state.status !== 'in-progress' || unit.playerId !== state.activePlayerId || unit.state.hasMoved) throw new Error('Invalid movement transaction');
@@ -66,9 +68,10 @@ export function validateState(state: GameState): void {
     }
     // Cancel must also produce a collision-free state, including against other units.
     const restored = living.map(m => ({ ...m, position: originals.find(o => o.modelId === m.id)?.position ?? m.position }));
-    if (restored.some((a, i) => restored.slice(i + 1).some(b => basesOverlap(a, b)))) throw new Error('Overlapping movement originals');
+    if (restored.some((a, i) => restored.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping movement originals');
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || !state.units.some(u => u.id === event.unitId))) throw new Error('Invalid event sequence');
   validateShootingState(state);
   validateCloseCombatState(state);
+  validateTerrainState(state);
 }

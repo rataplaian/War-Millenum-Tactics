@@ -1,5 +1,5 @@
 import type { GameState } from '../models';
-import { baseInsideBattlefield, centreDistance, EPSILON, isFinitePosition } from '../utils/geometry';
+import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { COMBAT_RULES } from '../rules/closeCombat';
 /** Task 003 snapshots without this optional extension remain loadable. */
 export function validateCloseCombatState(state: GameState): void {
@@ -42,7 +42,7 @@ export function validateCloseCombatState(state: GameState): void {
       const model = source!.models.find(m => m.id === original.modelId);
       require(model && isFinitePosition(original.position) && Number.isFinite(original.movementUsed) && original.movementUsed === model.movementUsed, 'original model');
       const used = move.used[original.modelId] ?? 0;
-      require(Number.isFinite(used) && used >= 0 && used <= move.allowance + EPSILON && centreDistance(original.position, model!.position) <= used + EPSILON, 'move distance');
+      require(Number.isFinite(used) && used >= 0 && used <= move.allowance + EPSILON && distanceTravelled(original.position, model!.position) <= used + EPSILON, 'move distance');
       require(!model!.alive || baseInsideBattlefield({ ...model!, position: original.position }, state.battlefield), 'original bounds');
     }
     require(Object.keys(move.used).every(id => source!.models.some(m => m.id === id)), 'usage model');

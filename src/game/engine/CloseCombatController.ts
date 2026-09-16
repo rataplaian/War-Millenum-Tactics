@@ -1,4 +1,5 @@
-import type { CommandResult, CombatMoveKind, CloseCombatEvent, GameState, Position, Unit, WeaponResolution } from '../models';
+import { validateTerrainPath } from '../terrain/movement';
+import type { CommandResult, CombatMoveKind, CloseCombatEvent, GameState, MovementPath, Position, Unit, WeaponResolution } from '../models';
 import { rollD6s, type RandomSource } from '../utils/dice';
 import { centreDistance, edgeDistance, EPSILON, isFinitePosition } from '../utils/geometry';
 import { definitionFor, failure, validateFinalPosition } from '../rules/movement';
@@ -77,14 +78,15 @@ export class CloseCombatController {
     if (move.kind === 'charge') return failure('IRREVERSIBLE_ACTION');
     this.restore(); this.emit(move.unitId, { type: 'combat-move-cancelled', kind: move.kind }); return success();
   }
-  moveCombatModel(modelId: string, position: Position): CommandResult {
+  moveCombatModel(modelId: string, position: Position, path?: MovementPath): CommandResult {
     const move = this.combat.move; if (!move) return failure('NO_COMBAT_MOVE');
     const phase = this.phase(move.kind === 'charge' ? 'Charge' : 'Fight'); if (!phase.ok) return phase;
     const unit = this.unit(move.unitId), model = unit.models.find(m => m.id === modelId);
     if (!model) return failure('MODEL_NOT_IN_UNIT');
     if (!model.alive) return failure('MODEL_DEAD');
     if (!isFinitePosition(position)) return failure('INVALID_POSITION');
-    const distance = centreDistance(model.position, position), total = (move.used[modelId] ?? 0) + distance;
+    const terrainPath = validateTerrainPath(this.state, model, position, path); if (!terrainPath.ok) return terrainPath;
+    const distance = terrainPath.value.totalMovementDistance, total = (move.used[modelId] ?? 0) + distance;
     if (total > move.allowance + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining: move.allowance - (move.used[modelId] ?? 0) };
     const placement = validateFinalPosition(this.state, unit, model, position, true); if (!placement.ok) return placement;
     const targets = move.targetIds.flatMap(id => living(this.unit(id)));

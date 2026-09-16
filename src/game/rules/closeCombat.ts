@@ -1,3 +1,4 @@
+import { validateTerrainPath } from '../terrain/movement';
 import type { CloseCombatState, CommandResult, GameState, Model, Position, Unit } from '../models';
 import { baseRadius, centreDistance, edgeDistance, EPSILON } from '../utils/geometry';
 import { definitionFor, failure, validateFinalPosition } from './movement';
@@ -63,9 +64,11 @@ export function reachablePositions(state: GameState, unit: Unit, model: Model, o
       if (q >= -EPSILON) for (const sign of [-1, 1]) points.push({ x: circle.position.x + sign * Math.sqrt(Math.max(0, q)), y });
     }
   }
-  return points.filter(position => centreDistance(origin, position) <= allowance + EPSILON &&
+  const levels = [...new Set([origin.z ?? 0, ...targetModels.map(m => m.position.z ?? 0), ...(state.battlefield.terrain?.features ?? []).flatMap(f => f.surfaces.map(surface => surface.z))])];
+  const candidates = state.battlefield.terrain ? points.flatMap(p => levels.map(z => ({ ...p, z }))) : points;
+  return candidates.filter(position => centreDistance(origin, position) <= allowance + EPSILON &&
     targetModels.some(t => edgeDistance({ ...model, position }, t) <= maxEdge + EPSILON) &&
-    validateFinalPosition(state, unit, model, position, true).ok);
+    validateFinalPosition(state, unit, model, position, true).ok && (() => { const path = validateTerrainPath(state, { ...model, position: origin }, position); return path.ok && path.value.totalMovementDistance <= allowance + EPSILON; })());
 }
 /** Return targets belonging to at least one witnessed legal target combination. */
 export function getLegalChargeTargets(state: GameState, unit: Unit, roll: number): Unit[] {
@@ -119,7 +122,7 @@ export function findChargeFormation(state: GameState, unit: Unit, targetIds: str
       });
     const seen = new Set<string>();
     for (const position of candidates) {
-      const key = `${position.x.toFixed(8)},${position.y.toFixed(8)}`; if (seen.has(key)) continue; seen.add(key);
+      const key = `${position.x.toFixed(8)},${position.y.toFixed(8)},${(position.z ?? 0).toFixed(8)}`; if (seen.has(key)) continue; seen.add(key);
       model.position = position;
       const found = search(index + 1); if (found) return found;
       if (budget < 0) break;

@@ -1,11 +1,11 @@
-import type { DeepReadonly, Weapon, Unit, UnitDefinition, WeaponResolution } from '../models';
+import type { DeepReadonly, Weapon, Unit, UnitDefinition, WeaponResolution, ModelAttackModifiers } from '../models';
 import { rollD6, type RandomSource } from '../utils/dice';
 import { resolveWeaponValue } from './weaponValues';
 import { hitSucceeds, resolveArmourSave, woundSucceeds, woundTarget } from './combatRolls';
 import { allocateDamage, applyDamage, type DamageAllocationPolicy } from './damageAllocation';
 /** Stateless orchestration. Each stage is replaceable without embedding rules in the UI. */
 export function resolveCombat(weapon: DeepReadonly<Weapon>, eligibleFiringModelIds: readonly string[], initialTarget: Unit,
-  targetDefinition: UnitDefinition, rng: RandomSource, allocation: DamageAllocationPolicy = allocateDamage) {
+  targetDefinition: UnitDefinition, rng: RandomSource, allocation: DamageAllocationPolicy = allocateDamage, modifiers: readonly ModelAttackModifiers[] = []) {
   let target = initialTarget;
   const attackCounts = eligibleFiringModelIds.map(modelId => ({ modelId, resolved: resolveWeaponValue(weapon.attacks, rng) }));
   const attacks = attackCounts.reduce((total, count) => total + count.resolved.value, 0);
@@ -15,12 +15,17 @@ export function resolveCombat(weapon: DeepReadonly<Weapon>, eligibleFiringModelI
     hitRolls: [], hits: 0, woundTarget: woundTarget(weapon.strength, targetDefinition.stats.toughness),
     woundRolls: [], wounds: 0, saveResults: [], savesFailed: 0, damageResults: [], totalDamage: 0, destroyedModelIds: [],
   };
+  if (modifiers.length) resolution.attackModifiers = JSON.parse(JSON.stringify(modifiers));
   // Attack counts are rolled per eligible model first, then each attack resolves fully in order.
   // Once no targets remain, discard unneeded attacks without consuming further RNG.
+  let countIndex = 0, attacksThroughModel = attackCounts[0]?.resolved.value ?? 0;
   for (let attack = 0; attack < attacks && target.models.some(m => m.alive); attack++) {
+    while (attack >= attacksThroughModel && countIndex < attackCounts.length - 1) attacksThroughModel += attackCounts[++countIndex]!.resolved.value;
+    const firingModelId = attackCounts[countIndex]!.modelId;
+    const skill = modifiers.find(m => m.modelId === firingModelId)?.effectiveSkill ?? weapon.skill;
     const hit = rollD6(rng);
     resolution.hitRolls.push(hit);
-    if (!hitSucceeds(hit, weapon.skill)) continue;
+    if (!hitSucceeds(hit, skill)) continue;
     resolution.hits++;
     const wound = rollD6(rng);
     resolution.woundRolls.push(wound);

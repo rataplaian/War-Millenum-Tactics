@@ -1,3 +1,4 @@
+import { validateFlowState } from '../flow/validateFlowState';
 import { onBattlefield } from '../reserves/location';
 import { validateDeploymentState } from './validateDeploymentState';
 import { modelsOverlap } from '../terrain/geometry';
@@ -28,7 +29,7 @@ export function validateState(state: GameState): void {
   if (!state.definitions.length || new Set(state.definitions.map(d => d.id)).size !== state.definitions.length) throw new Error('Invalid catalog');
   for (const d of state.definitions) {
     if (!d.id || !d.factionId || !Number.isSafeInteger(d.modelCount) || d.modelCount < 1 ||
-        !Number.isSafeInteger(d.stats.wounds) || d.stats.wounds < 1 || !nonNegative(d.stats.movement) ||
+        !Number.isSafeInteger(d.stats.leadership) || d.stats.leadership < 1 || !Number.isSafeInteger(d.stats.objectiveControl) || d.stats.objectiveControl < 0 || !Number.isSafeInteger(d.stats.wounds) || d.stats.wounds < 1 || !nonNegative(d.stats.movement) ||
         d.defaultBase.kind !== 'circle' || !Number.isFinite(d.defaultBase.diameterMm) || d.defaultBase.diameterMm <= 0) throw new Error('Invalid definition');
   }
   for (const definition of state.definitions) {
@@ -50,7 +51,7 @@ export function validateState(state: GameState): void {
       if (model.unitId !== unit.id || !Number.isInteger(model.woundsRemaining) || model.woundsRemaining < 0 || model.woundsRemaining > d.stats.wounds ||
           model.alive !== (model.woundsRemaining > 0) || !isFinitePosition(model.position) ||
           model.base.kind !== 'circle' || !Number.isFinite(model.base.diameterMm) || model.base.diameterMm <= 0 ||
-          !nonNegative(model.movementUsed) || model.movementUsed > d.stats.movement + EPSILON ||
+          !nonNegative(model.movementUsed) || (!state.flow && model.movementUsed > d.stats.movement + EPSILON) ||
           (onBattlefield(unit) && model.alive && !baseInsideBattlefield(model, state.battlefield))) throw new Error('Invalid model');
     }
   }
@@ -72,7 +73,8 @@ export function validateState(state: GameState): void {
     const restored = living.map(m => ({ ...m, position: originals.find(o => o.modelId === m.id)?.position ?? m.position }));
     if (restored.some((a, i) => restored.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping movement originals');
   }
-  if (state.events.some((event, i) => event.sequence !== i + 1 || !state.units.some(u => u.id === event.unitId))) throw new Error('Invalid event sequence');
+  if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !state.units.some(u => u.id === event.unitId)))) throw new Error('Invalid event sequence');
+  validateFlowState(state);
   validateShootingState(state);
   validateCloseCombatState(state);
   validateTerrainState(state);

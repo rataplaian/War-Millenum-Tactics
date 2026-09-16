@@ -1,3 +1,4 @@
+import { modifierDelta } from '../effects/EffectEngine';
 import type { AttackModifier, GameState, Model, ModelAttackModifiers, Unit } from '../models';
 import type { VisibilityProvider } from './visibility';
 import { baseSupported, elevation } from './geometry';
@@ -23,5 +24,7 @@ export function shootingModifiers(state: GameState, attacker: Model, target: Uni
   const modifiers: AttackModifier[] = [];
   if (benefitOfCover(state, attacker, target, provider)) modifiers.push({ source: 'COVER', skillDelta: 1 });
   if (plungingFire(state, attacker, target, provider)) modifiers.push({ source: 'PLUNGING_FIRE', skillDelta: -1 });
+  const delta = modifierDelta(state, attacker.unitId, 'BS');
+  if (delta) modifiers.push({ source: 'TEMPORARY_EFFECT', skillDelta: delta });
   return { modelId: attacker.id, baseSkill, effectiveSkill: applySkillModifiers(baseSkill, modifiers), modifiers };
 }

@@ -14,6 +14,10 @@ export function validateShootingState(state: GameState): void {
       b.position.x < 0 || b.position.y < 0 || b.position.x + b.width > state.battlefield.width ||
       b.position.y + b.height > state.battlefield.height)) throw new Error('Invalid LOS blocker');
   for (const [i, event] of state.events.entries()) {
+    if (event.type === 'flow') {
+      if (event.sequence !== i + 1 || !state.players.some(p => p.id === event.playerId) || (event.unitId && !state.units.some(u => u.id === event.unitId)) || !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn || event.round !== Math.floor((event.turn - 1) / 2) + 1) throw new Error('Invalid flow event context');
+      continue;
+    }
     const source = state.units.find(u => u.id === event.unitId);
     if (!EVENT_TYPES.includes(event.type) || event.sequence !== i + 1 || !source || event.playerId !== source.playerId ||
         !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn ||
@@ -41,7 +45,7 @@ export function validateShootingState(state: GameState): void {
       transaction.firedWeaponIds.some(id => !weapons.some(w => w.id === id && w.kind === 'ranged'))) throw new Error('Invalid fired weapon references');
   const start = state.events.reduce((last, e, i) => e.type === 'shooting-started' && e.unitId === source.id && e.turn === state.turn ? i : last, -1);
   if (start < 0) throw new Error('Missing shooting-started event');
-  const actionEvents = state.events.slice(start + 1);
+  const actionEvents = state.events.slice(start + 1).filter(e => e.type !== 'flow');
   if (actionEvents.some(e => e.type === 'shooting-cancelled' || e.type === 'shooting-completed' || e.unitId !== source.id || e.turn !== state.turn)) throw new Error('Invalid open shooting history');
   const shots = actionEvents.filter(e => e.type === 'weapon-fired');
   if (shots.length !== transaction.firedWeaponIds.length || shots.some((e, i) => e.resolution.weaponId !== transaction.firedWeaponIds[i]) ||

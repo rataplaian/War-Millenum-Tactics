@@ -1,3 +1,5 @@
+import { effectiveFlag } from '../effects/EffectEngine';
+import { temporalBlock } from '../flow/TimingWindows';
 import { battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import type { CommandFailure, CommandResult, GameState, LegalTarget, RangedWeapon, Unit } from '../models';
 import { definitionFor, failure } from './movement';
@@ -8,6 +10,7 @@ import { createVisibilityProvider, type VisibilityProvider } from '../terrain/vi
 /** Centralized prototype engagement restriction. No pistol/vehicle exceptions. */
 export function normalShootingAllowed(state: GameState, unit: Unit): boolean { return !isUnitEngaged(state, unit); }
 export function shootingPhaseError(state: GameState): CommandFailure | null {
+  const block = temporalBlock(state); if (block) return block;
   if (!battleStarted(state)) return failure('PRE_BATTLE');
   if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
@@ -23,6 +26,7 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
+  if (effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasShot) return failure('ALREADY_SHOT');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (!normalShootingAllowed(state, unit)) return failure('UNIT_ENGAGED');

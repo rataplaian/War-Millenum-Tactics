@@ -11,7 +11,7 @@ export function advanceTurn(state: GameState): GameState {
   const index = state.players.findIndex(player => player.id === state.activePlayerId);
   const next = (index + 1) % 2;
   return { ...state, closeCombat: undefined, activePlayerId: state.players[next]!.id, phase: 'Command', turn: state.turn + 1,
-    round: state.round + (state.players[next]!.id === (state.deployment?.firstTurnPlayerId ?? state.players[0].id) ? 1 : 0), units: state.units.map(unit => ({ ...unit, state: freshUnitState(), models: unit.models.map(model => ({ ...model, movementUsed: 0 })) })) };
+    round: state.round + (state.players[next]!.id === (state.deployment?.firstTurnPlayerId ?? state.players[0].id) ? 1 : 0), units: state.units.map(unit => ({ ...unit, state: { ...freshUnitState(), ...(unit.state.battleShocked === undefined ? {} : { battleShocked: unit.state.battleShocked }) }, models: unit.models.map(model => ({ ...model, movementUsed: 0 })) })) };
 }
 export function advancePhase(state: GameState): GameState {
   if (!battleStarted(state) || actionBusy(state)) throw new Error('Unfinished action or pre-battle');

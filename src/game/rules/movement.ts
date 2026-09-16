@@ -1,4 +1,6 @@
-import type { CommandFailure, CommandResult, GameState, Model, Position, Unit, UnitDefinition } from '../models';
+import { validateTerrainPath, validateTerrainPosition } from '../terrain/movement';
+import { modelsOverlap } from '../terrain/geometry';
+import type { CommandFailure, CommandResult, GameState, Model, MovementPath, Position, Unit, UnitDefinition } from '../models';
 import { baseInsideBattlefield, basesOverlap, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { enemyModelsWithinEngagement, isUnitEngaged } from './spatial';
 export const failure = (reason: CommandFailure['reason']): CommandFailure => ({ ok: false, reason });
@@ -32,13 +34,15 @@ export function validateFinalPosition(state: GameState, unit: Unit, model: Model
   const candidate = { ...model, position: target };
   if (!baseInsideBattlefield(candidate, state.battlefield)) return failure('OUTSIDE_BATTLEFIELD');
   const blocker = state.units.flatMap(u => u.models)
-    .find(other => other.alive && other.id !== model.id && basesOverlap(candidate, other));
+    .find(other => other.alive && other.id !== model.id && modelsOverlap(candidate, other));
   if (blocker) return { ...failure('BASE_OVERLAP'), blockingModelId: blocker.id };
+  const terrain = validateTerrainPosition(state, candidate);
+  if (!terrain.ok) return terrain;
   const enemy = enemyModelsWithinEngagement(state, unit.playerId, candidate)[0];
   if (enemy && !allowEngagement) return { ...failure('ENEMY_ENGAGEMENT'), blockingModelId: enemy.id };
   return { ok: true, value: undefined };
 }
-export function validateModelMove(state: GameState, modelId: string, target: Position): CommandResult<MoveDetails> {
+export function validateModelMove(state: GameState, modelId: string, target: Position, path?: MovementPath): CommandResult<MoveDetails> {
   const error = movementPhaseError(state);
   if (error) return error;
   if (!state.movement) return failure('NO_ACTIVE_MOVEMENT');
@@ -49,10 +53,12 @@ export function validateModelMove(state: GameState, modelId: string, target: Pos
   if (!model) return failure('MODEL_NOT_IN_UNIT');
   if (!model.alive) return failure('MODEL_DEAD');
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
-  const distance = distanceTravelled(model.position, target);
+  const terrainPath = validateTerrainPath(state, model, target, path);
+  const distance = terrainPath.ok ? terrainPath.value.totalMovementDistance : distanceTravelled(model.position, target);
   const allowance = definitionFor(state, unit).stats.movement;
   const remaining = Math.max(0, allowance - model.movementUsed);
   if (distance > remaining + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining };
+  if (!terrainPath.ok) return terrainPath;
   const placement = validateFinalPosition(state, unit, model, target);
   if (!placement.ok) return { ...placement, distance, remaining };
   const totalUsed = Math.min(allowance, model.movementUsed + distance);

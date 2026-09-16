@@ -4,13 +4,13 @@ export const EPSILON = 1e-9;
 export const mmToInches = (mm: number): number => mm / 25.4;
 export const inchesToMm = (inches: number): number => inches * 25.4;
 export const baseRadius = (base: BaseGeometry): number => mmToInches(base.diameterMm) / 2;
-export const isFinitePosition = (p: Position): boolean => Number.isFinite(p.x) && Number.isFinite(p.y);
+export const isFinitePosition = (p: Position): boolean => Number.isFinite(p.x) && Number.isFinite(p.y) && (p.z === undefined || (Number.isFinite(p.z) && p.z >= 0));
 export const centreDistance = (a: Position, b: Position): number => Math.hypot(b.x - a.x, b.y - a.y);
-export const distanceTravelled = centreDistance;
+export const distanceTravelled = (a: Position, b: Position): number => centreDistance(a, b) + Math.abs((b.z ?? 0) - (a.z ?? 0));
 export interface CircularFootprint { position: Position; base: BaseGeometry }
 /** Non-negative gap; touching and overlapping bases both have zero edge distance. */
 export function edgeDistance(a: CircularFootprint, b: CircularFootprint): number {
-  return Math.max(0, centreDistance(a.position, b.position) - baseRadius(a.base) - baseRadius(b.base));
+  return Math.hypot(Math.max(0, centreDistance(a.position, b.position) - baseRadius(a.base) - baseRadius(b.base)), (a.position.z ?? 0) - (b.position.z ?? 0));
 }
 export function basesOverlap(a: CircularFootprint, b: CircularFootprint): boolean {
   return centreDistance(a.position, b.position) < baseRadius(a.base) + baseRadius(b.base) - EPSILON;

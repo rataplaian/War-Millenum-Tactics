@@ -1,3 +1,4 @@
+import { TerrainOverlay } from './TerrainOverlay';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { GameState, Position } from '../game/models';
@@ -27,6 +28,7 @@ export function BattlefieldView({ state, selectedModelId, target, onModel, onTar
         width: blocker.width * transform.scale, height: blocker.height * transform.scale,
         backgroundColor: blocker.opaque ? '#64748b' : '#475569', opacity: 0.6 }} />;
     })}
+    {transform && <TerrainOverlay state={state} transform={transform} />}
     {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive).map((model, i) => {
       const centre = transform.gameToScreen(model.position);
       const diameter = baseRadius(model.base) * 2 * transform.scale;

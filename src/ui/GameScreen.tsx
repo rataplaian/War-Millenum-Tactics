@@ -3,7 +3,8 @@ import { Button, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { GameEngine } from '../game/engine/GameEngine';
-import { createCloseCombatTestMatch } from '../game/data/closeCombatPrototype';
+import { createTerrainTestMatch, TERRAIN_SCENARIOS, type TerrainScenario } from '../game/data/terrainPrototype';
+import { TerrainDebugPanel } from './TerrainDebugPanel';
 import { CloseCombatPanel } from './CloseCombatPanel';
 import type { CommandResult, FailureReason, GameState, Position } from '../game/models';
 import { BattlefieldView, PLAYER_COLORS } from './BattlefieldView';
@@ -34,12 +35,16 @@ export function GameScreen() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
+  const [scenario, setScenario] = useState<TerrainScenario>('VERTICAL');
+  const [observerId, setObserverId] = useState<string | null>('unit-1:model:1');
+  const [targetZ, setTargetZ] = useState(0);
   function report(result: CommandResult<unknown>, success: string) {
     setMessage(result.ok ? success : `${MESSAGES[result.reason] ?? result.reason.replaceAll("_", " ")}${result.blockingModelId ? ` Blocker: ${result.blockingModelId}.` : ''}`);
     setState(engine.current!.getState());
   }
   function start() {
-    engine.current = GameEngine.create(createCloseCombatTestMatch());
+    setSelectedModelId(null); setTarget(null); setTargetZ(0);
+    engine.current = GameEngine.create(createTerrainTestMatch(scenario));
     rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
@@ -65,6 +70,7 @@ export function GameScreen() {
     setSelectedModelId(modelId); setTarget(null);
   }
   function move(position: Position) {
+    position = { ...position, z: targetZ };
     if (!selectedModelId) { setMessage('Select a friendly unit and one of its models first.'); return; }
     if (engine.current!.getState().closeCombat?.move) {
       const result = engine.current!.moveCombatModel(selectedModelId, position);
@@ -81,13 +87,14 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Movement, shooting, charge and fight</Text><Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Terrain and visibility</Text><Text style={styles.text}>Scenario: {scenario}</Text>{TERRAIN_SCENARIOS.map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
       <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>
+      <TerrainDebugPanel state={state} engine={engine.current!} observerId={observerId} onObserver={setObserverId} targetZ={targetZ} onTargetZ={setTargetZ} onDestination={move} />
       {state.units.map(unit => {
         const definition = state.definitions.find(d => d.id === unit.definitionId)!;
         const playerIndex = state.players.findIndex(p => p.id === unit.playerId);
@@ -113,6 +120,7 @@ export function GameScreen() {
         report(engine.current!.tryNextPhase(), 'Phase advanced.'); setSelectedModelId(null); setTarget(null);
       }} />
       <BattleLog events={state.events} />
+      <Button title="END DEBUG BATTLE / SELECT ANOTHER SCENARIO" onPress={() => { setState(null); engine.current = null; }} />
     </>}
   </ScrollView></SafeAreaView>;
 }

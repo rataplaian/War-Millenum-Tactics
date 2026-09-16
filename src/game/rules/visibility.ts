@@ -21,7 +21,7 @@ export function segmentIntersectsRectangle(from: Position, to: Position, rectang
   }
   return true;
 }
-/** Pure seam for a future height/terrain/detection policy; models are not blockers. */
+/** @deprecated Task 003 compatibility seam. Default Shooting uses terrain/visibility.ts. */
 export type VisibilityPolicy = (shooter: Model, target: Model, battlefield: Battlefield) => boolean;
 export const basicLineOfSight: VisibilityPolicy = (shooter, target, battlefield) =>
   shooter.alive && target.alive && !battlefield.losBlockers.some(blocker => blocker.opaque &&

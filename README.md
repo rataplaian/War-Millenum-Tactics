@@ -31,7 +31,7 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 004
+## Current status: Task 005
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 
@@ -43,7 +43,7 @@ Implemented: immutable unit definitions separated from runtime instances, circul
 4. Move the other models as needed, then **COMPLETE MOVE**. The final unit formation must satisfy configured coherency.
 5. **CANCEL MOVE** restores all positions and movement usage from the start of that unit's action. Complete or cancel before advancing phases.
 
-The field is a configurable 30″ × 24″ prototype. Both factions and all spatial-rule values are test fixtures, not official rules. Player 1 is blue; Player 2 is pink. A unit cannot complete a second normal movement action in the same turn. Engaged units and destinations within the configured enemy engagement distance are rejected for normal movement.
+The terrain debug field is a configurable 40″ × 30″ prototype; earlier fixtures remain available. Both factions and all spatial-rule values are test fixtures, not official rules. Player 1 is blue; Player 2 is pink. A unit cannot complete a second normal movement action in the same turn. Engaged units and destinations within the configured enemy engagement distance are rejected for normal movement.
 
 ### Try shooting
 
@@ -52,11 +52,11 @@ The field is a configurable 30″ × 24″ prototype. Both factions and all spat
 3. Read the battle log: attacks, hits, wounds, failed saves, actual damage and casualties. Dead circles are hidden; unit cards retain health/model counts.
 4. Use **COMPLETE SHOOTING** to finish. **CANCEL SHOOTING** is available only before any dice have been rolled.
 
-Both invented factions have ranged weapons. The engine supports one use per profile and different targets for different profiles. It checks base-edge range and basic centre-ray LOS, then resolves attacks → hits → wounds → armour saves → damage with an explicit RNG. The debug battle uses seed 42 for repeatable results. Default battlefield: no LOS blockers; rectangular blocker cases are tested separately.
+Both invented factions have ranged weapons. The engine supports one use per profile and different targets for different profiles. It checks three-dimensional base-edge range and the modular primitive-volume Visibility Engine, then resolves attacks → hits → wounds → armour saves → damage with an explicit RNG. The debug battle uses seed 42 for repeatable results. The scenario picker supplies clear, partial, blocked, Obscuring, Hidden, Plunging Fire and vertical-movement examples.
 
 ### Try charge and fight
 
-The debug scenario starts the units closer together and uses **2-inch engagement**. Both units have invented melee equipment. Older engine fixtures retain their original deployment and configurable 1-inch engagement.
+The debug scenarios use **2-inch engagement**. Both units have invented melee equipment. Older engine fixtures retain their original deployment and configurable 1-inch engagement.
 
 1. Advance through Movement and Shooting to **Charge**. Select **CHARGE: [unit]** to roll 2D6, then choose legal target(s) and **CONFIRM CHARGE TARGETS**.
 2. Tap a charging model and a destination. Move each model closer to the selected targets; **COMPLETE COMBAT MOVE** checks the whole formation. Failed completion leaves positions editable. **RESOLVE AS FAILED CHARGE** restores starting positions but consumes this charge attempt; it never refunds the roll.
@@ -66,11 +66,23 @@ The debug scenario starts the units closer together and uses **2-inch engagement
 
 Pile In and Consolidation can be cancelled before completion; fight selection can be cancelled before rolling or completing an Overrun. Model positions, movement usage, casualties and logs are engine-owned. The separate Fight selector may be the opponent, even though the main turn remains the active player's.
 
+### Try terrain and visibility
+
+Choose a scenario before **START TEST BATTLE**. Yellow outlines show Terrain Areas; feature labels show EXPOSED / LIGHT / DENSE and height, while blue outlines mark elevated surfaces. The inspector reports model elevation, area membership, Hidden, Detection Range, target visibility, Cover and effective BS. These values come from engine queries.
+
+In the default vertical scenario, enter Movement and select a model. Choose elevation 3 and its existing x/y coordinates to climb onto the ruin platform; each climb costs 3 inches. Move the other models before completing if needed for coherency. Battlefield taps use the selected elevation. Cancel restores the original positions including elevation.
+
+Task 005 adds data-driven areas/features, shared terrain paths for normal and combat movement, supported elevated placement, a replaceable VisibilityProvider, Hidden/Detection, Obscuring/Solid, and per-model Cover/Plunging Fire attack modifiers. Shooting immediately updates Hidden eligibility when attacks are generated; shooting history survives turn resets.
+
 ### Scope and limits
 
-Collision checks only the final base position, not the path. Charge target queries search for a complete legal formation, using a bounded deterministic search (10,000 formation nodes; 256 target combinations). They may conservatively omit legal crowded formations or movement orderings outside that search. This is a tested prototype rules subset, not a claim of complete 11th-edition rules compliance. No full terrain, vertical movement, Advance, Fall Back, transports, Deep Strike, AI, army building, missions, objectives, multiplayer, backend or polished art. No drag or zoom yet.
+Model-to-model collision checks remain endpoint-only. Terrain uses horizontal/vertical waypoint paths and swept base checks; it is not a general pathfinder. Charge target queries retain bounded deterministic formation search (10,000 nodes; 256 target combinations), including terrain validation, and can conservatively omit legal detours or crowded formations.
 
-Snapshots use schema version 3 with an optional closeCombat extension. Unmodified Task 003 snapshots remain loadable; open charge/fight/movement actions can be restored in memory. Schema-1 and schema-2 snapshots are explicitly rejected. Ranged loadouts are homogeneous, wound allocation is automatic and LOS is only a replaceable 2D rectangle policy. No weapon special rules, cover, invulnerable saves or Feel No Pain. RNG continuation is caller-owned and is not stored in snapshots. There is no disk save, replay executor or full untrusted-JSON parser; restarting the app resets the battle. Mobile export is not a real-device test or APK/IPA build.
+Visibility samples logical cylinders against extruded polygons and openings; it distinguishes hidden, partial and full visibility but is not exact mesh LOS. Query caches belong to detached snapshots and cannot survive movement. Large-army performance has not been benchmarked. The project implements a documented prototype subset, not complete 11th-edition compliance.
+
+Snapshots remain schema 3: optional terrain, model volume, shooting history and z are additive; missing z means ground level. Older Task 003/004 snapshots remain loadable. Schema 1/2 are rejected. RNG continuation is caller-owned. There is no persistent save, replay executor or hostile-JSON parser.
+
+No Advance/Fall Back actions, faction rules, complete weapon keyword pack, invulnerable saves, Feel No Pain, transports, reserves, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 

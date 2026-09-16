@@ -2,7 +2,8 @@ import type { CommandFailure, CommandResult, GameState, LegalTarget, RangedWeapo
 import { definitionFor, failure } from './movement';
 import { isUnitEngaged } from './spatial';
 import { edgeDistance, EPSILON } from '../utils/geometry';
-import { basicLineOfSight, type VisibilityPolicy } from './visibility';
+import type { VisibilityPolicy } from './visibility';
+import { createVisibilityProvider, type VisibilityProvider } from '../terrain/visibility';
 /** Centralized prototype engagement restriction. No pistol/vehicle exceptions. */
 export function normalShootingAllowed(state: GameState, unit: Unit): boolean { return !isUnitEngaged(state, unit); }
 export function shootingPhaseError(state: GameState): CommandFailure | null {
@@ -42,7 +43,7 @@ export function validateRangedWeapon(state: GameState, unitId: string, weaponId:
 /** Centralized range measurement policy: living base-edge gap in inches. */
 export const rangedDistance = edgeDistance;
 export function validateShootingTarget(state: GameState, unitId: string, weaponId: string, targetUnitId: string,
-  visibility: VisibilityPolicy = basicLineOfSight): CommandResult<LegalTarget> {
+  visibility: VisibilityProvider | VisibilityPolicy = createVisibilityProvider(state)): CommandResult<LegalTarget> {
   const weapon = validateRangedWeapon(state, unitId, weaponId);
   if (!weapon.ok) return weapon;
   const shooter = state.units.find(u => u.id === unitId)!;
@@ -62,7 +63,7 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
       if (distance <= weapon.value.range + EPSILON) {
         anyInRange = true;
         // Range AND visibility must apply to the same shooter/target pair.
-        if (visibility(model, enemy, state.battlefield)) eligible = true;
+        if (typeof visibility === 'function' ? visibility(model, enemy, state.battlefield) : visibility.isModelVisible(model, enemy)) eligible = true;
       }
     }
     return eligible;
@@ -72,7 +73,7 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
   return { ok: true, value: { targetUnitId, eligibleFiringModelIds, nearestDistance } };
 }
 export function legalShootingTargets(state: GameState, unitId: string, weaponId: string,
-  visibility: VisibilityPolicy = basicLineOfSight): CommandResult<LegalTarget[]> {
+  visibility: VisibilityProvider | VisibilityPolicy = createVisibilityProvider(state)): CommandResult<LegalTarget[]> {
   const weapon = validateRangedWeapon(state, unitId, weaponId);
   if (!weapon.ok) return weapon;
   const targets: LegalTarget[] = [];

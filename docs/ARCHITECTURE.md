@@ -1,4 +1,4 @@
-# Architecture — Task 004
+# Architecture — Task 005
 
 ## Dependency boundary and folders
 
@@ -33,11 +33,11 @@ The engine copies loaded state and every returned snapshot. Readonly types prote
 
 ## Coordinates, battlefield and bases
 
-World positions and distances use floating-point **inches**, with origin (0, 0) at the top-left, positive x right and positive y down. There is no grid, pixel coordinate, height or snapping in the engine. A Battlefield provides configurable width and height. The fixture is 30 × 24 inches; no movement function assumes that size.
+World positions and distances use floating-point **inches**, with origin (0, 0) at the top-left, positive x right and positive y down. There is no grid, pixel coordinate or snapping in the engine. Optional z supplies logical elevation; omitted z means zero. A Battlefield provides configurable width and height. The terrain fixture is 40 × 30 inches (legacy fixtures remain 30 × 24); no movement function assumes that size.
 
 A circular base stores `kind: 'circle'` and `diameterMm`. Conversion uses 25.4 mm per inch; radius is derived in inches so diameter and radius cannot drift out of sync. Future hull shapes can extend this discriminated union and the geometry functions.
 
-`centreDistance`/`distanceTravelled` are Euclidean. `edgeDistance` subtracts both radii and clamps the gap to zero. `basesOverlap` checks actual penetration; tangent contact is allowed. `positionInsideBattlefield` checks a point, whereas normal movement uses `baseInsideBattlefield` to require the entire base inside all four edges. EPSILON=1e-9 inches is a centralized numerical comparison tolerance, not a game-rule distance.
+`centreDistance` is horizontal Euclidean distance. `distanceTravelled` adds horizontal distance and absolute elevation change. `edgeDistance` combines the nonnegative horizontal base gap with the elevation difference using Euclidean distance. `basesOverlap` checks actual penetration; tangent contact is allowed. `positionInsideBattlefield` checks a point, whereas normal movement uses `baseInsideBattlefield` to require the entire base inside all four edges. EPSILON=1e-9 inches is a centralized numerical comparison tolerance, not a game-rule distance.
 
 ## Normal movement transaction
 
@@ -57,7 +57,7 @@ Temporary incoherency while repositioning individual models is permitted; endpoi
 
 `validateFinalPosition` is an endpoint policy seam separate from allowance/action checks. It scans all living friendly and enemy models, excludes the moving model itself and returns the first blocking model ID in deterministic state order. Initial/loaded live bases must also be in bounds and non-overlapping.
 
-Only final positions are checked. A segment may currently cross a friendly model, enemy model or engagement area when its destination is clear. Add intermediate/path validation before endpoint validation when those rules are implemented. No terrain, swept collision or pathfinding is implied by the current API.
+Model-to-model collision remains endpoint-only: a path may cross another model. Task 005 additionally validates terrain along axis-separated horizontal/vertical segments. Cylinder height intervals allow non-overlapping models on separate floors. No general pathfinder is implied.
 
 `SpatialRules.engagementDistance` is an inclusive edge-to-edge threshold. `enemyModelsWithinEngagement` returns nearby living enemies; `isUnitEngaged` checks living models in a unit. The prototype also rejects normal-move destinations inside this threshold. Task 004 reuses these spatial queries for charge and melee. Fall Back and reaction rules remain absent.
 
@@ -91,7 +91,7 @@ The debug screen distinguishes players by colour and labels, allows friendly uni
 
 ## Future extensions
 
-Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. No terrain, vertical movement, Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer or backend are included.
+Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer and backend remain outside scope.
 
 
 ## Shooting subsystem (Task 003)
@@ -119,13 +119,11 @@ New modules:
 
 Expected failures are domain results and change neither health, transaction, events nor RNG. Resolution works on detached target data before committing, so a broken injected RNG/allocation policy can throw without partially changing battle state. Such programming errors cannot restore the external RNG stream: callers must repair the provider and restart from a known stream, not assume RNG rollback.
 
-### Range and replaceable basic LOS
+### Range and visibility
 
 Range uses the centralized `rangedDistance` policy: base-edge distance in inches, inclusive at maximum range with the existing numerical tolerance. At least one living target must be both in range and visible to the same firing model. Dead models are excluded. nearestDistance describes the closest living pair and is not a claim that this pair is visible.
 
-`VisibilityPolicy(shooter, target, battlefield)` is injected through optional GameEngine policies. The default is centre-to-centre segment testing against opaque axis-aligned rectangles. Closed boundary contact, endpoints inside a blocker and corner tangency block LOS. Transparent blockers do not block. Other models never occlude. Blockers must be finite positive rectangles inside the battlefield and have unique IDs. The prototype has no blockers by default; tests provide dedicated blocker layouts. The UI renders blockers if supplied.
-
-These rectangles are temporary LOS geometry, not terrain: they impose no movement restrictions, cover, height, windows, obscuring, detection or indirect-fire rules. Future visibility implementations can replace the policy without altering combat resolution. Restore snapshots with the same policy configuration; functions are not serialized.
+Task 005 replaces the default centre-ray policy with `terrain/visibility.ts` and its `VisibilityProvider`. Shooting asks that provider for visibility, without embedding LOS geometry. The old `VisibilityPolicy` injection remains a deprecated compatibility adapter for existing callers/tests. Legacy rectangular `losBlockers` are interpreted as infinitely tall opaque prisms by the new default provider. Policies are executable dependencies and must be supplied again when restoring a snapshot.
 
 ### Deterministic resolution pipeline
 
@@ -133,7 +131,7 @@ All random calls use the supplied RandomSource via the existing D6 helpers. The 
 
 1. Resolve attacks independently for each eligible firing model in stable model order. Fixed values require no rolls; dice values record each roll and modifier result. Catalog validation rejects negative possible outcomes, invalid die counts/sides and unsafe integer values.
 2. Resolve each generated attack completely before the next: hit D6 against Skill, wound D6 against the centralized strength/toughness threshold, armour save, then damage for an unsaved wound.
-3. Wound targets are 2/3/4/5/6 according to the Task 003 strength-versus-toughness relationship. Skills are 2–6; no modifiers, rerolls or critical effects are applied.
+3. Wound targets are 2/3/4/5/6 according to the Task 003 strength-versus-toughness relationship. Skills are 2–6; Task 005 supplies temporary per-firing-model Cover/Plunging Fire modifiers. Rerolls and critical effects remain absent.
 4. Required save is `Save - signedAP`. Save data supports 2–7 and AP is a non-positive integer. Requirements above 6 are automatically unsaved with a null save roll and no RNG consumption.
 5. Resolve fixed/dice damage and allocate to a wounded living model first, otherwise the first living model in stable snapshot array order. Allocation is a separate injectable pure policy. It selects from the target unit's living models, not just those originally visible/in range; this is an explicit prototype unit-wide allocation convention.
 6. Damage applies to exactly one model. Excess is lost; zero wounds means alive=false. Dead models stay in state and disappear from circles and subsequent movement/spatial/shooting queries.
@@ -144,7 +142,7 @@ If the unit is destroyed, stop further hit/wound/save/damage rolls. `attacks` re
 
 GameEvent preserves all movement variants and adds shooting-started, weapon-fired, model-damaged, model-destroyed, shooting-cancelled and shooting-completed. Every event uses deterministic sequence/round/turn/player/unit context. weapon-fired includes eligible model IDs, per-model attack rolls/counts, hit/wound rolls, saves, damage rolls, applied/excess damage and casualty IDs. It is followed by ordered damage/casualty detail events. The UI consumes these events directly; it does not recalculate combat outcomes. This remains a lightweight debug history, not event sourcing or a complete replay executor.
 
-Weapon traits remain inert data. Future attack-count/hit/wound/save stages can add weapon modifiers, Torrent, Rapid Fire, Sustained/Lethal Hits, Devastating Wounds, rerolls, invulnerable saves and Feel No Pain without moving rules into UI. Eligibility and visibility policies are the extension points for Pistols, Indirect Fire, detection and reaction shooting; allocation is the seam for Precision, attachments and player choice. None of those mechanics is implemented here.
+Weapon traits remain inert data. Future attack-count/hit/wound/save stages can add weapon modifiers, Torrent, Rapid Fire, Sustained/Lethal Hits, Devastating Wounds, rerolls, invulnerable saves and Feel No Pain without moving rules into UI. Eligibility and visibility policies are the extension points for Pistols, Indirect Fire and reaction shooting; allocation is the seam for Precision, attachments and player choice. None of those mechanics is implemented here.
 
 
 ## Charge and Fight subsystem (Task 004)
@@ -169,7 +167,7 @@ Pile In and Consolidation cancellation restore positions and normal movement usa
 
 The charge roll is two injected D6. Selection occurs afterwards and checks enemy ownership, 12-inch declaration distance, rolled distance and a full formation witness. Multi-target sets are validated together, including engagement with every selected target and no unselected enemy. Charge movement is limited per model by the roll. Each model ends closer to a selected target; completion enforces the one-inch/engagement endpoint priorities where a legal placement is available.
 
-`reachablePositions` builds candidate endpoints from circle intersections, circle projections, and battlefield boundaries using the existing geometry utilities. It has no screen sampling, grid or pixel tolerance. Endpoint feasibility does not imply clear intermediate movement: as with Task 002, swept collision, terrain and paths are outside this task.
+`reachablePositions` builds candidate endpoints from circle intersections, circle projections, and battlefield boundaries using the existing geometry utilities. It has no screen sampling, grid or pixel tolerance. Task 005 validates candidate default paths against terrain and considers relevant surface elevations. Model-to-model swept collision is still absent. Valid charges requiring detours outside the generated paths may be conservatively omitted.
 
 `findChargeFormation` searches candidate endpoints in deterministic model order and validates the whole witness against coherency, engagement and priority constraints. It examines at most 10,000 search nodes; target queries examine at most 256 target combinations. This is deliberately conservative: complex formations requiring other model orders or endpoints not represented by this candidate search may be omitted. Selection revalidates the requested exact target set. Final movement completion remains authoritative and does not rely on the search witness being followed by the player.
 
@@ -200,3 +198,58 @@ Events extend GameEvent with charge-declared, charge-rolled, charge-target-selec
 `CloseCombatPanel` renders engine choices/results and calls commands. `GameScreen` routes circle taps and world-coordinate destinations to the active transaction; `coordinates.ts` is unchanged. `BattleLog` reads either shooting or melee resolutions. `closeCombatPrototype.ts` supplies the close deployment, two-inch engagement and invented melee equipment; the original fixtures remain usable by previous tests.
 
 The user-specified sequencing was cross-checked against the official [combat changes overview](https://www.warhammer-community.com/en-gb/articles/m3son4il/new40k-combat-changes-shake-up-fighting-in-the-new-edition/), including two-inch engagement, post-roll target selection and Fight ordering. The project implements a documented subset, not a complete or licensed rules database. No official datasheets or rulebook passages are copied.
+
+
+## Terrain and visibility subsystem (Task 005)
+
+### Data, geometry and compatibility
+
+`models/index.ts` defines TerrainArea (regulatory polygon, feature references, metadata) separately from TerrainFeature (physical sections, openings, category, height and surfaces). Obscuring is derived from referenced LIGHT/DENSE features, never stored as a second mutable truth. Features and rules are data-driven; keyword checks never inspect unit or faction names.
+
+`terrain/geometry.ts` provides polygon containment, base support, segment/prism intersections and cylinder occlusion. Coordinates and heights are inches. Simple concave polygons are supported; polygon holes and arbitrary meshes are not. A model's optional logical cylinder volume defaults to height 1.5 inches with its existing circular base radius.
+
+Schema remains 3 because additions are optional. Missing z means 0 without rewriting legacy snapshots; missing terrain means an empty battlefield. `validateTerrainState.ts` validates polygons, references, surfaces, volumes, history and live/original transaction placements. Snapshot round-trips cover old and new data. This remains a trusted typed-state loader, not an arbitrary JSON parser.
+
+### Shared movement interaction
+
+`terrain/movement.ts` owns traversal and final support. Normal Move, Charge, Pile In, Overrun and Consolidation all call the same validator. Future Advance/Fall Back commands can use it, but those actions are not introduced here.
+
+Movement commands optionally accept a waypoint path (at most 64 points). Segments are horizontal or vertical; the total is horizontal distance plus absolute vertical distance, never a diagonal shortcut. Without waypoints, ascent approaches then climbs, and descent drops then moves horizontally. Vertical segments must remain within the configured 0.5-inch proximity of an appropriate physical section or surface. Explicit paths permit supported climb/traverse/descent combinations; the engine does not find arbitrary routes automatically.
+
+EXPOSED/LIGHT permit traversal. DENSE permits horizontal traversal for INFANTRY/BEASTS/SWARM/MOBILE and vertical traversal for INFANTRY/BEASTS/SWARM. Other models may cross sections up to the configured 2-inch threshold horizontally; taller sections require legal climbing. Floors/ceilings remain physical obstacles to unsupported traversal. Opening traversal is conservative and may require explicit waypoint subdivision.
+
+Elevated endpoints require INFANTRY/BEASTS/SWARM/FLY/MONSTER, a stable surface at the destination elevation and full base support with no overhang. Physical sections cannot contain a final model volume; Dense low openings closed by Solid are also invalid endpoints. Ground and elevated placement share battlefield bounds and cylinder collision checks. Stability is supplied by terrain data rather than a physics simulation. Slopes, vehicle hulls and flight-specific shortcuts are not implemented.
+
+Transactions retain original z and cumulative movement cost. Cancel restores positions exactly; rejected commands mutate nothing. Existing close-combat priorities, sequencing and irreversible dice boundaries remain controller responsibilities.
+
+### Visibility provider and performance
+
+`terrain/visibility.ts` exposes model LOS, model visible/fully visible, unit visible/fully visible and an inspection result. Each provider owns a detached state snapshot and a pair-query cache; engines create a fresh provider for each query/command, so movement, casualties and shooting cannot leave stale results.
+
+The deterministic prototype samples 27 observer points and 18 target-facing cylinder points (up to 486 rays per pair). Any clear ray permits visibility; full visibility requires one observer sample to see every sampled facing point. This is a bounded primitive approximation, not proof of visibility for every continuous mesh point. Same-observer-unit models are ignored. Other living models occlude; full-unit checks additionally ignore target-unit members. Dead models do not occlude.
+
+Physical sections block rays except at openings. Dense Solid closes the opening portion at or below the configured 3-inch threshold; upper openings can transmit rays. An intervening Obscuring area blocks regardless of height, but an area containing either model is excluded. A second intervening area still blocks. Area membership uses base intersection, while supported placement requires the entire base.
+
+Geometry queries are isolated for a future spatial index. Current work per pair is bounded rays times candidate terrain/model count, and unit queries examine relevant model pairs. No large-army benchmark or global cache is claimed. A future renderer may replace the provider without changing Shooting.
+
+### Hidden, Detection and attack modifiers
+
+`terrain/rules.ts` centralizes keyword rules and configurable thresholds. Hidden is derived for INFANTRY/BEASTS/SWARM inside an area containing DENSE, provided the unit generated no ranged attacks this or the preceding player turn. `lastRangedAttackTurnIndex` survives action resets; legacy snapshots fall back to recorded weapon-fired events. Actual generated attacks update history immediately, even if they miss; zero attacks do not. Hidden becomes eligible again two player-turn indices after the last attack.
+
+Detection defaults to 15 inches and is supplied through an observer-based policy as requested for this prototype. It adds a visibility requirement only for Hidden enemies; it neither grants LOS nor limits ordinary weapon range. The provider still checks physical LOS and Obscuring.
+
+`terrain/attackModifiers.ts` derives Cover only when every living target model qualifies: eligible light-body keywords inside an area, or incomplete visibility caused by terrain. Model-only occlusion does not grant Cover. Plunging Fire requires a visible unit containing a ground-level model and either a supported attacker on terrain at least 3 inches high or TOWERING within 12 inches.
+
+Cover adds 1 to required BS; Plunging Fire subtracts 1. The shared modifier function combines them and clamps effective skill to the prototype's centralized 2–6 bounds. Values are captured per eligible firing model when resolving a profile and recorded in resolution metadata; catalog profiles stay unchanged. The existing hit/wound/save/damage/allocation pipeline is reused, with melee unaffected.
+
+### Events and debug UI
+
+`terrain/events.ts` compares successful state transitions and appends area entered/left, elevation changed and Hidden gained/lost events. Shooting adds Cover/Plunging Fire events and per-model effective BS metadata. Pure inspection never emits events. Cancellation also records the meaningful restored spatial changes.
+
+`terrainPrototype.ts` supplies a Dense ruin with a floor/platform and low/upper openings, a Light area and an Exposed feature. Eight selectable scenarios exercise clear/partial/blocked LOS, Obscuring, Hidden near/far, Plunging Fire and climbing. Older fixtures and their tests remain unchanged.
+
+`TerrainOverlay` renders polygon outlines, physical sections and surface labels. `TerrainDebugPanel` requests engine inspection for model area membership, elevation, Hidden, Detection, target visibility, Cover and effective BS. The screen/world conversion remains x/y only; selected z is a separate command input. Exact-coordinate controls permit vertical moves without tying world geometry to pixels. No rules are calculated in the rendering layer.
+
+### Reference and limits
+
+Terrain/visibility behavior was checked against the official [core rules PDF](https://assets.warhammer-community.com/eng_01-06_warhammer40k_new40k_core_rules-was6fbu1ix-hfewhmxyiy.pdf), particularly terrain sections 13.06–13.11 and Plunging Fire 22.05. The repository contains original implementations and placeholder data, not copied rulebook passages. Sampled volumes, observer-based Detection policy, conservative charge/path search and simplified characteristic bounds are explicit prototype choices. No complete rules compliance, final mesh precision or real-device testing is claimed.

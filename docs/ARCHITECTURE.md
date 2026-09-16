@@ -1,4 +1,4 @@
-# Architecture — Task 005
+# Architecture — Task 006
 
 ## Dependency boundary and folders
 
@@ -23,7 +23,7 @@ Task 001 copied definition fields into each Unit. Task 002 deliberately replaces
 
 - `UnitDefinition` is a deeply readonly catalog entry: name, faction, starting model count, stats, default base, equipment, keywords and ability data.
 - `GameState.definitions` holds that catalog once per snapshot, making a match self-contained for local restoration. There is no separate database or fetching layer.
-- `Unit` contains only ID, definitionId, playerId, runtime models and action flags. Static characteristics resolve through definitionId, never through a copied `unit.stats` or `unit.name`.
+- `Unit` contains ID, definitionId, playerId, runtime models and action flags, plus optional history/location/arrival records. Static characteristics resolve through definitionId, never through a copied `unit.stats` or `unit.name`.
 - `Model` owns position, wounds, alive state, its physical base geometry and movementUsed. Base geometry is initialized from the definition's default base, allowing a later per-model footprint without copying the entire unit catalog into runtime instances.
 - Armies still reference runtime unit IDs. Dead models remain in their unit, but do not block movement, participate in coherency or engage enemies.
 
@@ -91,7 +91,7 @@ The debug screen distinguishes players by colour and labels, allows friendly uni
 
 ## Future extensions
 
-Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. Advance, Fall Back, transports, reserves, missions, objectives, AI, multiplayer and backend remain outside scope.
+Keep new tabletop rules as tested pure functions under rules/ and route mutations through engine commands. Catalogs should remain keyed data; supported ability IDs may later resolve to pure rule handlers. Never hardcode faction characteristics in React components or execute strings from catalog data. Advance, Fall Back, transports, missions, objectives, AI, multiplayer and backend remain outside scope. Deployment and reserves are added in Task 006 below.
 
 
 ## Shooting subsystem (Task 003)
@@ -253,3 +253,69 @@ Cover adds 1 to required BS; Plunging Fire subtracts 1. The shared modifier func
 ### Reference and limits
 
 Terrain/visibility behavior was checked against the official [core rules PDF](https://assets.warhammer-community.com/eng_01-06_warhammer40k_new40k_core_rules-was6fbu1ix-hfewhmxyiy.pdf), particularly terrain sections 13.06–13.11 and Plunging Fire 22.05. The repository contains original implementations and placeholder data, not copied rulebook passages. Sampled volumes, observer-based Detection policy, conservative charge/path search and simplified characteristic bounds are explicit prototype choices. No complete rules compliance, final mesh precision or real-device testing is claimed.
+
+
+## Deployment and reserves subsystem (Task 006)
+
+### Modules and dependency boundary
+
+- `setup/types.ts` defines serializable locations, core abilities, zones, preparation stages, setup/Scout transactions, reserve records and arrival records.
+- `setup/SetupValidator.ts` centralizes full-formation validation. `SetupController.ts` stages/commits deployment, Infiltrators, Scout reserve setup and both Ingress methods.
+- `deployment/DeploymentController.ts` sequences preparation, alternates deployment, resolves ability choices and determines Scout player order. `ScoutController.ts` reuses the existing terrain-path and endpoint validators.
+- `reserves/location.ts` centralizes presence on the battlefield; `ReservePolicy.ts` holds configuration and policy hooks; `ReserveController.ts` handles removal and expiration.
+- `engine/validateDeploymentState.ts` checks additive snapshot contracts. GameEngine exposes commands on detached drafts and commits only successful results.
+- `data/deploymentPrototype.ts` and `ui/DeploymentPanel.tsx` supply the invented test scenario and debug controls. No game module depends on React or display coordinates.
+
+### Locations and catalog data
+
+Static definitions optionally add points and typed core abilities. A model can explicitly override its inherited core-ability list; all living models must have the required ability. Scouts uses the minimum of each model's best Scouts distance. Existing untyped Ability data remains available for future non-core rules.
+
+Unit location is BATTLEFIELD, STRATEGIC_RESERVES, RESERVES or DESTROYED. Pending deployment uses RESERVES without an initial strategic-reserve selection; the pre-battle queue distinguishes these units from selected Strategic Reserves. Off-field models retain health, coordinates, base geometry and flags, but their coordinates are inert. Presence filtering applies to collision, spatial engagement, LOS occlusion, targeting, charge/fight eligibility, terrain membership and rendering. Destroyed models remain in snapshots, with zero wounds and alive=false.
+
+There is no EMBARKED gameplay. The discriminated location type can later grow alongside a transport reference and appropriate presence policy. A reserve record's optional transportHasIngressed field is only an expiration-policy seam.
+
+### Preparation and sequencing
+
+The optional deployment state explicitly progresses PRE_BATTLE → DECLARE_BATTLE_FORMATIONS → DEPLOY_ARMIES → PRE_BATTLE_RULES → BATTLE_STARTED. Missing deployment state means a legacy already-started battle. Battle commands and phase/turn progression reject during preparation.
+
+Declaration selects Strategic Reserves and accounts for their catalog points per player against configured battle points × ratio (default 0.5). FORTIFICATION is rejected. Selection can be changed during declarations; it is frozen afterwards. The initial selection IDs preserve the original accounting after units arrive.
+
+Deployment alternates after each committed unit, skipping a side with no pending units. The starting deployment player is configuration. First turn is an explicit player input, finalized before pre-battle rules; no roll or mission engine is invented. Turn progression and snapshot turn consistency use this player as the round's first player, without reordering player identities.
+
+A unit with both Scouts and Infiltrators requires an explicit choice. Choices may be changed before deployment/use; confirmed deployment locks the choice. Using either incompatible mode records it for the battle. Scouts opportunities resolve first-turn player's units before the opponent's. Each must be completed or explicitly skipped before battle start. Scouts in Strategic Reserves may instead use the shared setup transaction to deploy wholly inside their own zone, consuming their Scout opportunity.
+
+### Setup geometry and transactions
+
+DeploymentZone is an owned polygon with metadata. Normal setup requires every living model's full circular base to fit one owned zone. Infiltrators replaces this with a strictly greater-than configured horizontal distance from every enemy model and enemy zone; default is 8 inches. Distances subtract base radii and deliberately ignore elevation. Exact boundary equality is rejected with the shared numerical tolerance.
+
+The shared validator replaces the candidate unit in a detached battlefield view, then checks bounds, terrain/support, elevation, friendly/enemy collisions, zone/edge constraints and whole-unit coherency. It accepts optional policy restrictions for future redeploy/disembark rules without implementing those actions.
+
+`beginDeployment`, `beginIngress` or `beginScoutSetup` opens a setup transaction. `stageSetupModel` and `stageSetupFormationAt` edit candidate positions only. Candidates may be incomplete or geometrically illegal while being edited; `previewSetup` reports the full formation result. Live positions/location change only on `completeSetup`. Rejected confirmation leaves all state unchanged. `cancelSetup` discards candidates, with an append-only cancellation event. An open transaction round-trips through snapshots.
+
+Scouts differs because it is actual movement: `beginScoutMove` records originals; `moveScoutModel` uses the shared waypoint distance, terrain and endpoint rules and tracks its own per-model usage. Completion checks coherency and horizontal enemy separation; cancellation restores exact positions and normal movement usage. Scouts does not consume the first turn's normal movement allowance. The inherited model-to-model collision policy remains endpoint-only.
+
+### Ingress and arrival effects
+
+Ingress is a Movement-phase move type, not a separate Reinforcements step. Both STRATEGIC_EDGE and DEEP_STRIKE use the same setup controller/validator. Normal Strategic Reserves start at configured round 2, require full formation within 6 inches of a common battlefield edge, more than 8 horizontal inches from enemies, and exclude enemy deployment zones before round 3. Per this task's explicit contract, the default uses one common edge; broader edge-union handling is not inferred.
+
+Deep Strike requires the ability on every living model, removes the edge restriction and permits the enemy zone; enemy distance, terrain and coherency still apply. A Deep Strike-capable unit in Strategic Reserves chooses its method explicitly on every Ingress. Generic RESERVES have no automatic strategic arrival permission: a supplied ReservePolicy must authorize an Ingress, whose selected method still determines geometry.
+
+Arrival records contain the method (STRATEGIC_RESERVES, DEEP_STRIKE or REPOSITION), Ingress method and absolute player-turn index. `moveLock: UNTIL_NEXT_CHARGE` blocks further move types until phase progression reaches Charge; advancing directly to another turn also clears the expired lock. Catalogs are never changed. Arrival state is not inferred from coordinates or hasMoved.
+
+`moveUnitToStrategicReserves(unitId, reason)` and the generic-reserves counterpart are trusted ability/debug hooks, not free player actions exposed by an implemented faction rule. They reject open transactions and preserve health, Battle-shock data, Advanced/Fell Back flags, shooting history and still-valid temporary effects. Existing ordinary turn expiry/reset behavior remains separate. No Battle-shock resolution system or new ability trigger engine is added.
+
+### Expiration and snapshots
+
+At the transition ending configured round 3, unarrived Strategic Reserves are destroyed. The default policy exempts repositioned units, units with prior Ingress and the future transport-arrival marker. `finishBattle()` independently resolves remaining Strategic/Generic Reserves, then marks the match finished. Custom policies can exempt units; they cannot select battlefield units for reserve destruction.
+
+Schema stays 3: every new field is additive. Omitted location retains legacy battlefield semantics; off-field positions are finite but need not satisfy battlefield placement. Omitted z remains zero. New snapshots validate zones, ownership, ability choices, points, stage, transaction exclusivity, arrivals, Scout originals/usage and active battlefield action sources. The loader is still for trusted typed snapshots, not a general hostile-JSON parser. Supplied executable policies and RNG continuation remain caller-owned.
+
+Events record reserve selection, deployment/mode, Scouts, Ingress/method, repositioning and reserve destruction. Pre-battle event actors are unit owners and need not be the future first-turn player. Pure previews generate no events.
+
+### Debug preview and limitations
+
+The debug screen can render 108 bounded complete-formation samples at the selected elevation. A green/red point evaluates translating the current formation to that anchor; it is neither an exhaustive legal region nor a game grid. Exact arbitrary floating-point coordinates are always accepted as input and validated at confirmation. No unbounded placement search is used.
+
+Large bases use the same full-base constraints. When no ordinary edge setup fits, the default rejects; `largeModelEdgeFallback` is a centralized policy hook. Detailed large-model arrival exceptions and their downstream attack/movement restrictions are deferred. No transports, leaders, CP, Rapid Ingress stratagem, mission scoring, objectives, faction rules, army builder, AI or persistent saves are introduced.
+
+Reference: official core-rules sections 20.01–20.04, 24.09, 24.20 and 24.31–24.32 in the PDF linked above, plus the explicit Task 006 rules contract. Thresholds are centralized configuration, not copied rulebook prose or UI conditions.

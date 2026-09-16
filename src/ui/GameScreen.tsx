@@ -1,3 +1,6 @@
+import { createDeploymentTestMatch } from '../game/data/deploymentPrototype';
+import { DeploymentPanel } from './DeploymentPanel';
+import { battleStarted, onBattlefield } from '../game/reserves/location';
 import { useRef, useState } from 'react';
 import { Button, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,7 +38,7 @@ export function GameScreen() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
-  const [scenario, setScenario] = useState<TerrainScenario>('VERTICAL');
+  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT'>('DEPLOYMENT');
   const [observerId, setObserverId] = useState<string | null>('unit-1:model:1');
   const [targetZ, setTargetZ] = useState(0);
   function report(result: CommandResult<unknown>, success: string) {
@@ -44,7 +47,7 @@ export function GameScreen() {
   }
   function start() {
     setSelectedModelId(null); setTarget(null); setTargetZ(0);
-    engine.current = GameEngine.create(createTerrainTestMatch(scenario));
+    engine.current = GameEngine.create(scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
     rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
@@ -87,15 +90,17 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Terrain and visibility</Text><Text style={styles.text}>Scenario: {scenario}</Text>{TERRAIN_SCENARIOS.map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Terrain and visibility</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
+      {state.deployment && <DeploymentPanel state={state} engine={engine.current!} report={report} />}
+      {battleStarted(state) && !state.setup && <>
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
       <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>
       <TerrainDebugPanel state={state} engine={engine.current!} observerId={observerId} onObserver={setObserverId} targetZ={targetZ} onTargetZ={setTargetZ} onDestination={move} />
-      {state.units.map(unit => {
+      {state.units.filter(onBattlefield).map(unit => {
         const definition = state.definitions.find(d => d.id === unit.definitionId)!;
         const playerIndex = state.players.findIndex(p => p.id === unit.playerId);
         return <View key={unit.id} style={styles.card}>
@@ -119,6 +124,8 @@ export function GameScreen() {
       <Button title="NEXT PHASE" disabled={!!state.movement || !!state.shooting || !!state.closeCombat?.charge || !!state.closeCombat?.move} onPress={() => {
         report(engine.current!.tryNextPhase(), 'Phase advanced.'); setSelectedModelId(null); setTarget(null);
       }} />
+      </>}
+      {!battleStarted(state) || state.setup ? <Text style={styles.note}>{message}</Text> : null}
       <BattleLog events={state.events} />
       <Button title="END DEBUG BATTLE / SELECT ANOTHER SCENARIO" onPress={() => { setState(null); engine.current = null; }} />
     </>}

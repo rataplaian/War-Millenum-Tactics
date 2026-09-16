@@ -1,3 +1,5 @@
+import { onBattlefield } from '../reserves/location';
+import { validateDeploymentState } from './validateDeploymentState';
 import { modelsOverlap } from '../terrain/geometry';
 import { validateTerrainState } from './validateTerrainState';
 import { validateCloseCombatState } from './validateCloseCombatState';
@@ -14,7 +16,7 @@ export function validateState(state: GameState): void {
       !['in-progress', 'finished'].includes(state.status)) throw new Error('Invalid match state (schema 3 required)');
   if (state.players.length !== 2 || new Set(state.players.map(p => p.id)).size !== 2 ||
       state.players.some(p => !p.id || !p.factionId) || !state.players.some(p => p.id === state.activePlayerId)) throw new Error('Invalid players');
-  if (state.round !== Math.floor((state.turn - 1) / 2) + 1 || state.activePlayerId !== state.players[(state.turn - 1) % 2]!.id) throw new Error('Inconsistent turn');
+  if (state.round !== Math.floor((state.turn - 1) / 2) + 1 || state.activePlayerId !== state.players[((state.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id) throw new Error('Inconsistent turn');
   if (!Number.isFinite(state.battlefield.width) || state.battlefield.width <= 0 ||
       !Number.isFinite(state.battlefield.height) || state.battlefield.height <= 0) throw new Error('Invalid battlefield');
   const { coherency, engagementDistance } = state.spatialRules;
@@ -49,14 +51,14 @@ export function validateState(state: GameState): void {
           model.alive !== (model.woundsRemaining > 0) || !isFinitePosition(model.position) ||
           model.base.kind !== 'circle' || !Number.isFinite(model.base.diameterMm) || model.base.diameterMm <= 0 ||
           !nonNegative(model.movementUsed) || model.movementUsed > d.stats.movement + EPSILON ||
-          (model.alive && !baseInsideBattlefield(model, state.battlefield))) throw new Error('Invalid model');
+          (onBattlefield(unit) && model.alive && !baseInsideBattlefield(model, state.battlefield))) throw new Error('Invalid model');
     }
   }
-  const living = state.units.flatMap(u => u.models).filter(m => m.alive);
+  const living = state.units.filter(onBattlefield).flatMap(u => u.models).filter(m => m.alive);
   if (living.some((a, i) => living.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping live bases');
   if (state.movement) {
     const unit = state.units.find(u => u.id === state.movement!.unitId);
-    if (!unit || state.phase !== 'Movement' || state.status !== 'in-progress' || unit.playerId !== state.activePlayerId || unit.state.hasMoved) throw new Error('Invalid movement transaction');
+    if (!unit || !onBattlefield(unit) || state.phase !== 'Movement' || state.status !== 'in-progress' || unit.playerId !== state.activePlayerId || unit.state.hasMoved) throw new Error('Invalid movement transaction');
     const originals = state.movement.originals;
     if (originals.length !== unit.models.length || new Set(originals.map(o => o.modelId)).size !== originals.length) throw new Error('Invalid movement originals');
     for (const original of originals) {
@@ -64,7 +66,7 @@ export function validateState(state: GameState): void {
       if (!model || !isFinitePosition(original.position) || !nonNegative(original.movementUsed) ||
           original.movementUsed > model.movementUsed + EPSILON ||
           distanceTravelled(original.position, model.position) > model.movementUsed - original.movementUsed + EPSILON ||
-          (model.alive && !baseInsideBattlefield({ ...model, position: original.position }, state.battlefield))) throw new Error('Invalid movement original');
+          (onBattlefield(unit) && model.alive && !baseInsideBattlefield({ ...model, position: original.position }, state.battlefield))) throw new Error('Invalid movement original');
     }
     // Cancel must also produce a collision-free state, including against other units.
     const restored = living.map(m => ({ ...m, position: originals.find(o => o.modelId === m.id)?.position ?? m.position }));
@@ -74,4 +76,5 @@ export function validateState(state: GameState): void {
   validateShootingState(state);
   validateCloseCombatState(state);
   validateTerrainState(state);
+  validateDeploymentState(state);
 }

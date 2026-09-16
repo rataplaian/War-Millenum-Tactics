@@ -1,3 +1,4 @@
+import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CloseCombatState, CommandResult, GameState, Model, Position, Unit } from '../models';
 import { baseRadius, centreDistance, edgeDistance, EPSILON } from '../utils/geometry';
@@ -7,7 +8,7 @@ import { checkCoherency, isUnitEngaged } from './spatial';
 /** Central configuration; world distances are inches. Engagement uses SpatialRules. */
 export const COMBAT_RULES = Object.freeze({ chargeTargetDistance: 12, chargeCloseDistance: 1, pileIn: 3, pileInTargetDistance: 5, consolidate: 3 });
 export const emptyCloseCombat = (): CloseCombatState => ({ charge: null, move: null, declared: [], effects: [], fight: null });
-export const living = (unit: Unit) => unit.models.filter(m => m.alive);
+export const living = (unit: Unit) => onBattlefield(unit) ? unit.models.filter(m => m.alive) : [];
 export const enemies = (state: GameState, unit: Unit) => state.units.filter(u => u.playerId !== unit.playerId && living(u).length);
 export const unitDistance = (a: Unit, b: Unit) => Math.min(...living(a).flatMap(m => living(b).map(n => edgeDistance(m, n))));
 export const engagedTargets = (state: GameState, unit: Unit) => enemies(state, unit).filter(u => unitDistance(unit, u) <= state.spatialRules.engagementDistance + EPSILON);
@@ -15,11 +16,15 @@ export const hasFightsFirst = (state: GameState, unit: Unit) => state.closeComba
 export interface ChargeExceptions { afterAdvance?: boolean; afterFallBack?: boolean; whileEngaged?: boolean }
 /** Generic extension point: future ability evaluation supplies permissions. */
 export function canDeclareCharge(state: GameState, unitId: string, exceptions: ChargeExceptions = {}): CommandResult<Unit> {
+  if (!battleStarted(state)) return failure('PRE_BATTLE');
+  if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
   if (state.phase !== 'Charge') return failure('WRONG_PHASE');
   if (state.movement || state.shooting || state.closeCombat?.charge || state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
+  if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
+  if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!living(unit).length) return failure('NO_LIVING_MODELS');
   if (state.closeCombat?.declared.includes(unitId)) return failure('ALREADY_DECLARED');

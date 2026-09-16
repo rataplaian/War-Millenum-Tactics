@@ -1,3 +1,4 @@
+import { onBattlefield } from '../reserves/location';
 import type { GameState, Model, TerrainArea, TerrainRules, Unit } from '../models';
 import { baseIntersectsPolygon, elevation } from './geometry';
 import { edgeDistance, EPSILON } from '../utils/geometry';
@@ -11,7 +12,7 @@ export function keywordsFor(s: GameState, model: Model): string[] {
 }
 export const hasAnyKeyword = (s: GameState, m: Model, allowed: readonly string[]) => keywordsFor(s, m).some(k => allowed.includes(k));
 export const LIGHT_BODY = ['INFANTRY', 'BEASTS', 'SWARM'] as const;
-export const areasForModel = (s: GameState, m: Model): TerrainArea[] => (s.battlefield.terrain?.areas ?? []).filter(area => baseIntersectsPolygon(m, area.footprint));
+export const areasForModel = (s: GameState, m: Model): TerrainArea[] => (onBattlefield(unitForModel(s, m)) ? s.battlefield.terrain?.areas ?? [] : []).filter(area => baseIntersectsPolygon(m, area.footprint));
 export const isObscuring = (s: GameState, area: TerrainArea): boolean => (s.battlefield.terrain?.features ?? []).some(f => area.featureIds.includes(f.id) && (f.category === 'LIGHT' || f.category === 'DENSE'));
 export function lastRangedAttackTurn(s: GameState, unit: Unit): number | undefined {
   // Old snapshots already contain attack events; preserve their Hidden history on load.

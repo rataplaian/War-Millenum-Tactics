@@ -9,7 +9,7 @@ export function BattleLog({ events }: { events: readonly GameEvent[] }) {
     </Text>}
     {(lastShot?.type === 'weapon-fired' || lastShot?.type === 'melee-attack-resolved') && lastShot.resolution.attackModifiers?.map(m => <Text key={m.modelId} style={{ color: '#cbd5e1', fontSize: 12 }}>{m.modelId}: BS {m.baseSkill}+ → {m.effectiveSkill}+ · {m.modifiers.map(modifier => modifier.source).join(' + ') || 'no terrain modifiers'}</Text>)}
     {events.slice(-6).map(event => <Text key={event.sequence} style={{ color: '#cbd5e1', fontSize: 12 }}>
-      #{event.sequence} · {event.unitId} · {event.type}
+      #{event.sequence} · {event.unitId} · {event.type}{'method' in event && event.method ? ` · ${event.method}` : ''}
     </Text>)}
   </View>;
 }

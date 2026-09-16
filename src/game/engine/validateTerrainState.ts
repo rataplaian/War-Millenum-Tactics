@@ -1,3 +1,4 @@
+import { onBattlefield } from '../reserves/location';
 import type { GameState, Polygon, TerrainPrism } from '../models';
 import { isFinitePosition } from '../utils/geometry';
 import { edges, modelsOverlap, pointInPolygon, segmentCrossParameters } from '../terrain/geometry';
@@ -39,11 +40,11 @@ export function validateTerrainState(state: GameState): void {
     require(unit.lastRangedAttackTurnIndex === undefined || (Number.isSafeInteger(unit.lastRangedAttackTurnIndex) && unit.lastRangedAttackTurnIndex >= 1 && unit.lastRangedAttackTurnIndex <= state.turn), 'ranged history');
     for (const model of unit.models) {
       require(!model.volume || (model.volume.kind === 'cylinder' && Number.isFinite(model.volume.height) && model.volume.height > 0), 'model volume');
-      if (model.alive) require(validateTerrainPosition(state, model).ok, 'model placement');
+      if (onBattlefield(unit) && model.alive) require(validateTerrainPosition(state, model).ok, 'model placement');
     }
   }
-  for (const transaction of [state.movement, state.closeCombat?.move]) if (transaction) {
-    const restored = state.units.flatMap(u => u.models).filter(m => m.alive).map(m => ({ ...m, position: transaction.originals.find(o => o.modelId === m.id)?.position ?? m.position }));
+  for (const transaction of [state.movement, state.closeCombat?.move, state.scout]) if (transaction) {
+    const restored = state.units.filter(onBattlefield).flatMap(u => u.models).filter(m => m.alive).map(m => ({ ...m, position: transaction.originals.find(o => o.modelId === m.id)?.position ?? m.position }));
     for (const model of restored) require(validateTerrainPosition(state, model).ok, 'original placement');
     require(!restored.some((m, i) => restored.slice(i + 1).some(n => modelsOverlap(m, n))), 'original collision');
   }

@@ -1,3 +1,4 @@
+import { battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import type { CommandFailure, CommandResult, GameState, LegalTarget, RangedWeapon, Unit } from '../models';
 import { definitionFor, failure } from './movement';
 import { isUnitEngaged } from './spatial';
@@ -7,6 +8,8 @@ import { createVisibilityProvider, type VisibilityProvider } from '../terrain/vi
 /** Centralized prototype engagement restriction. No pistol/vehicle exceptions. */
 export function normalShootingAllowed(state: GameState, unit: Unit): boolean { return !isUnitEngaged(state, unit); }
 export function shootingPhaseError(state: GameState): CommandFailure | null {
+  if (!battleStarted(state)) return failure('PRE_BATTLE');
+  if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
   if (state.movement) return failure('MOVEMENT_IN_PROGRESS');
   if (state.phase !== 'Shooting') return failure('WRONG_PHASE');
@@ -19,6 +22,7 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
+  if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (unit.state.hasShot) return failure('ALREADY_SHOT');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (!normalShootingAllowed(state, unit)) return failure('UNIT_ENGAGED');
@@ -50,6 +54,7 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
   const target = state.units.find(u => u.id === targetUnitId);
   if (!target) return failure('TARGET_NOT_FOUND');
   if (target.playerId === shooter.playerId) return failure('TARGET_NOT_ENEMY');
+  if (!onBattlefield(target)) return failure('NOT_ON_BATTLEFIELD');
   const livingTargets = target.models.filter(m => m.alive);
   if (!livingTargets.length) return failure('TARGET_DESTROYED');
   const livingShooters = shooter.models.filter(m => m.alive);

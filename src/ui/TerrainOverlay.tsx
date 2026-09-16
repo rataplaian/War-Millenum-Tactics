@@ -15,6 +15,7 @@ export function TerrainOverlay({ state, transform }: { state: GameState; transfo
   </View>;
   const terrain = state.battlefield.terrain;
   return <View pointerEvents="none" style={{ position: 'absolute', inset: 0 }}>
+    {state.deployment?.zones.map((z, i) => draw(z.id, z.footprint, i === 0 ? '#60a5fa' : '#f472b6', `DEPLOY ${z.playerId}`))}
     {terrain?.areas.map(a => draw(a.id, a.footprint, '#fbbf24'))}
     {terrain?.features.flatMap(f => [draw(f.id, f.footprint, f.category === 'DENSE' ? '#c084fc' : f.category === 'LIGHT' ? '#4ade80' : '#cbd5e1', `${f.category} ${f.height}″`),
       ...f.sections.map((section, i) => draw(`${f.id}-section-${i}`, section.footprint, '#94a3b8')),

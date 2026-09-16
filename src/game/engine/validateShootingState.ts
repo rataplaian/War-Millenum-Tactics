@@ -1,6 +1,8 @@
+import { SETUP_EVENT_TYPES } from '../setup/types';
+import { onBattlefield } from '../reserves/location';
 import type { GameState } from '../models';
 import { definitionFor } from '../rules/movement';
-const EVENT_TYPES = ['movement-started', 'model-moved', 'movement-cancelled', 'movement-completed',
+const EVENT_TYPES: readonly string[] = [...SETUP_EVENT_TYPES, 'movement-started', 'model-moved', 'movement-cancelled', 'movement-completed',
   'charge-declared', 'charge-rolled', 'charge-target-selected', 'charge-failed', 'combat-move-started', 'combat-model-moved', 'combat-move-completed', 'combat-move-cancelled', 'fight-unit-selected', 'fight-unit-completed', 'fight-unit-cancelled', 'overrun-fight', 'melee-attack-started', 'melee-attack-resolved',
   'model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost', 'cover-applied', 'plunging-fire-applied',
   'shooting-started', 'weapon-fired', 'model-damaged', 'model-destroyed', 'shooting-cancelled', 'shooting-completed'];
@@ -16,7 +18,7 @@ export function validateShootingState(state: GameState): void {
     if (!EVENT_TYPES.includes(event.type) || event.sequence !== i + 1 || !source || event.playerId !== source.playerId ||
         !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn ||
         event.round !== Math.floor((event.turn - 1) / 2) + 1 ||
-        (!['model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost'].includes(event.type) && !event.type.startsWith('combat-') && !event.type.startsWith('fight-') && !event.type.startsWith('melee-') && event.type !== 'overrun-fight' && state.players[(event.turn - 1) % 2]!.id !== event.playerId)) throw new Error('Invalid event context');
+        (!SETUP_EVENT_TYPES.some(t => t === event.type) && !['model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost'].includes(event.type) && !event.type.startsWith('combat-') && !event.type.startsWith('fight-') && !event.type.startsWith('melee-') && event.type !== 'overrun-fight' && state.players[((event.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id !== event.playerId)) throw new Error('Invalid event context');
     if (event.type === 'weapon-fired' || event.type === 'model-damaged' || event.type === 'model-destroyed') {
       const weaponId = event.type === 'weapon-fired' ? event.resolution.weaponId : event.weaponId;
       const targetId = event.type === 'weapon-fired' ? event.resolution.targetUnitId : event.targetUnitId;
@@ -31,7 +33,7 @@ export function validateShootingState(state: GameState): void {
   if (!state.shooting) return;
   const transaction = state.shooting;
   const source = state.units.find(u => u.id === transaction.unitId);
-  if (state.movement || state.phase !== 'Shooting' || state.status !== 'in-progress' || !source ||
+  if (state.movement || state.phase !== 'Shooting' || state.status !== 'in-progress' || !source || !onBattlefield(source) ||
       source.playerId !== state.activePlayerId || source.state.hasShot || !source.models.some(m => m.alive) ||
       typeof transaction.hasRolled !== 'boolean') throw new Error('Invalid shooting transaction');
   const weapons = definitionFor(state, source).weapons;

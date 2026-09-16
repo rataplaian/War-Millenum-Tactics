@@ -1,3 +1,4 @@
+import { onBattlefield } from '../reserves/location';
 import type { CoherencyRule, GameState, Model, Unit } from '../models';
 import { edgeDistance, EPSILON } from '../utils/geometry';
 export interface CoherencyResult { coherent: boolean; failingModelIds: string[]; connected: boolean }
@@ -21,10 +22,10 @@ export function checkCoherency(models: readonly Model[], rule: CoherencyRule): C
   return { coherent: failingModelIds.length === 0 && (!rule.requireConnected || connected), failingModelIds, connected };
 }
 export function enemyModelsWithinEngagement(state: GameState, playerId: string, model: Model): Model[] {
-  if (!model.alive) return [];
-  return state.units.filter(u => u.playerId !== playerId).flatMap(u => u.models)
+  if (!model.alive || !state.units.some(u => u.id === model.unitId && onBattlefield(u))) return [];
+  return state.units.filter(u => onBattlefield(u) && u.playerId !== playerId).flatMap(u => u.models)
     .filter(enemy => enemy.alive && edgeDistance(model, enemy) <= state.spatialRules.engagementDistance + EPSILON);
 }
 export function isUnitEngaged(state: GameState, unit: Unit): boolean {
-  return unit.models.some(model => enemyModelsWithinEngagement(state, unit.playerId, model).length > 0);
+  return onBattlefield(unit) && unit.models.some(model => enemyModelsWithinEngagement(state, unit.playerId, model).length > 0);
 }

@@ -1,3 +1,4 @@
+import { battleStarted, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CommandResult, CombatMoveKind, CloseCombatEvent, GameState, MovementPath, Position, Unit, WeaponResolution } from '../models';
 import { rollD6s, type RandomSource } from '../utils/dice';
@@ -21,6 +22,8 @@ export class CloseCombatController {
       turn: this.state.turn, playerId: this.unit(unitId).playerId, unitId } as CloseCombatEvent);
   }
   private phase(phase: 'Charge' | 'Fight'): CommandResult {
+    if (!battleStarted(this.state)) return failure('PRE_BATTLE');
+    if (setupBusy(this.state)) return failure('SETUP_IN_PROGRESS');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (this.state.phase !== phase) return failure('WRONG_PHASE');
     if (this.state.movement || this.state.shooting) return failure('COMBAT_IN_PROGRESS');

@@ -1,3 +1,11 @@
+import { DeploymentController, nextDeploymentPlayer } from '../deployment/DeploymentController';
+import { ScoutController } from '../deployment/ScoutController';
+import { SetupController } from '../setup/SetupController';
+import type { SetupPolicy } from '../setup/SetupValidator';
+import type { DeploymentAbilityChoice, Formation, IngressMethod } from '../setup/types';
+import { reservePoints, type ReservePolicy } from '../reserves/ReservePolicy';
+import { moveUnitToReserves, resolveReserveExpiration } from '../reserves/ReserveController';
+import { actionBusy, battleStarted, onBattlefield, setupBusy, normalizeDestroyed } from '../reserves/location';
 import { recordTerrainChanges } from '../terrain/events';
 import { createVisibilityProvider, type VisibilityProviderFactory } from '../terrain/visibility';
 import { getDetectionRange, type DetectionRangePolicy, areasForModel, isModelHidden } from '../terrain/rules';
@@ -16,7 +24,7 @@ import { type VisibilityPolicy } from '../rules/visibility';
 import { allocateDamage, type DamageAllocationPolicy } from '../rules/damageAllocation';
 import { resolveShooting } from '../rules/resolveShooting';
 import type { RandomSource } from '../utils/dice';
-export interface EnginePolicies { visibility?: VisibilityPolicy; visibilityProvider?: VisibilityProviderFactory; detectionRange?: DetectionRangePolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
+export interface EnginePolicies { setup?: SetupPolicy; reserves?: ReservePolicy; visibility?: VisibilityPolicy; visibilityProvider?: VisibilityProviderFactory; detectionRange?: DetectionRangePolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 type EventPayload = GameEvent extends infer E ? E extends GameEvent ?
@@ -42,14 +50,19 @@ export class GameEngine {
   tryNextPhase(): CommandResult<GameState> { return this.progress(advancePhase); }
   tryNextTurn(): CommandResult<GameState> { return this.progress(advanceTurn); }
   private progress(transition: (state: GameState) => GameState): CommandResult<GameState> {
+    if (!battleStarted(this.state)) return failure('PRE_BATTLE');
+    if (setupBusy(this.state)) return failure('SETUP_IN_PROGRESS');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (this.state.movement) return failure('MOVEMENT_IN_PROGRESS');
     if (this.state.shooting) return failure('SHOOTING_IN_PROGRESS');
     if (this.state.closeCombat?.charge || this.state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
     if (this.state.phase === 'Fight' && this.state.closeCombat?.fight && this.state.closeCombat.fight.step !== 'END') return failure('WRONG_FIGHT_STEP');
-    if (this.state.phase === 'Fight' && !this.state.closeCombat?.fight && this.state.units.some(u => u.state.hasCharged || isUnitEngaged(this.state, u))) return failure('WRONG_FIGHT_STEP');
+    if (this.state.phase === 'Fight' && !this.state.closeCombat?.fight && this.state.units.some(u => onBattlefield(u) && (u.state.hasCharged || isUnitEngaged(this.state, u)))) return failure('WRONG_FIGHT_STEP');
     const before = this.getState();
-    this.state = transition(this.state);
+    const next = transition(this.getState());
+    if (next.round > before.round) resolveReserveExpiration(next, before.round, this.policies.reserves);
+    if (next.phase === 'Charge' || next.turn > before.turn) for (const u of next.units) delete u.moveLock;
+    this.state = next;
     recordTerrainChanges(before, this.state);
     return { ok: true, value: this.getState() };
   }
@@ -156,6 +169,7 @@ export class GameEngine {
     this.event(transaction.unitId, { type: 'weapon-fired', resolution: outcome.resolution });
     for (const m of modifiers) for (const modifier of m.modifiers) this.event(transaction.unitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId, effectiveSkill: m.effectiveSkill });
     recordTerrainChanges(before, this.state);
+    normalizeDestroyed(this.state);
     for (const damage of outcome.resolution.damageResults) {
       this.event(transaction.unitId, { type: 'model-damaged', targetUnitId, weaponId, damage });
       if (damage.destroyed) this.event(transaction.unitId, { type: 'model-destroyed', targetUnitId, weaponId, modelId: damage.modelId });
@@ -186,7 +200,7 @@ export class GameEngine {
   private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
     const draft = this.getState();
     const result = command(new CloseCombatController(draft));
-    if (result.ok) { recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) { normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
     return copy(result);
   }
   declareCharge(unitId: string, rng: RandomSource) {
@@ -226,10 +240,77 @@ export class GameEngine {
     const target = snapshot.units.find(u => u.id === targetUnitId);
     const source = observer && snapshot.units.find(u => u.id === observer.unitId)!;
     const weapon = source && definitionFor(snapshot, source).weapons.find(w => w.id === weaponId && w.kind === 'ranged');
-    return copy({ models: snapshot.units.flatMap(u => u.models).filter(m => m.alive).map(m => ({ modelId: m.id, elevation: elevation(m.position), areaIds: areasForModel(snapshot, m).map(a => a.id), hidden: isModelHidden(snapshot, m), detectionRange: (this.policies.detectionRange ?? getDetectionRange)(m, snapshot) })),
+    return copy({ models: snapshot.units.filter(onBattlefield).flatMap(u => u.models).filter(m => m.alive).map(m => ({ modelId: m.id, elevation: elevation(m.position), areaIds: areasForModel(snapshot, m).map(a => a.id), hidden: isModelHidden(snapshot, m), detectionRange: (this.policies.detectionRange ?? getDetectionRange)(m, snapshot) })),
       target: observer && target ? { visible: provider.isUnitVisible(observer, target), fullyVisible: provider.isUnitFullyVisible(observer, target),
         models: target.models.filter(m => m.alive).map(m => ({ modelId: m.id, ...provider.inspect(observer, m) })),
         attack: weapon ? shootingModifiers(snapshot, observer, target, weapon.skill, provider) : null } : null });
+  }
+
+  private setupCommand<T>(command: (draft: GameState) => CommandResult<T>): CommandResult<T> {
+    if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
+    const draft = this.getState(), result = command(draft);
+    if (result.ok) { recordTerrainChanges(this.state, draft); this.state = draft; }
+    return copy(result);
+  }
+  advancePreBattle() { return this.setupCommand(s => new DeploymentController(s).advance()); }
+  setFirstTurn(playerId: string) { return this.setupCommand(s => new DeploymentController(s).setFirstTurn(playerId)); }
+  chooseDeploymentAbility(unitId: string, choice: DeploymentAbilityChoice) { return this.setupCommand(s => new DeploymentController(s).choose(unitId, choice)); }
+  selectStrategicReserve(unitId: string, selected = true) { return this.setupCommand(s => new DeploymentController(s).selectReserve(unitId, selected)); }
+  getDeploymentOptions() {
+    const s = this.getState(); return { nextPlayerId: s.deployment ? nextDeploymentPlayer(s) : null,
+      scoutUnitIds: new DeploymentController(s).scoutUnits().map(u => u.id),
+      points: s.players.map(p => ({ playerId: p.id, ...reservePoints(s, p.id) })) };
+  }
+  beginDeployment(unitId: string, infiltrators = false) { return this.setupCommand(s => new SetupController(s, this.policies.setup).begin(unitId, 'DEPLOYMENT', infiltrators ? 'INFILTRATORS' : 'NORMAL')); }
+  beginIngress(unitId: string, method: IngressMethod) { return this.setupCommand(s => new SetupController(s, this.policies.setup, this.policies.reserves).begin(unitId, 'INGRESS_MOVE', method)); }
+  beginScoutSetup(unitId: string) { return this.setupCommand(s => new SetupController(s, this.policies.setup).begin(unitId, 'SCOUT_SETUP', 'NORMAL')); }
+  stageSetupModel(modelId: string, position: Position) { return this.setupCommand(s => new SetupController(s).stageModel(modelId, position)); }
+  previewSetup(formation?: Formation) { return copy(new SetupController(this.getState(), this.policies.setup).preview(formation)); }
+  completeSetup() { return this.setupCommand(s => new SetupController(s, this.policies.setup).complete()); }
+  cancelSetup() { return this.setupCommand(s => new SetupController(s).cancel()); }
+  beginScoutMove(unitId: string) { return this.setupCommand(s => new ScoutController(s).begin(unitId)); }
+  moveScoutModel(modelId: string, position: Position, path?: MovementPath) { return this.setupCommand(s => new ScoutController(s).move(modelId, position, path)); }
+  completeScoutMove() { return this.setupCommand(s => new ScoutController(s).finish()); }
+  cancelScoutMove() { return this.setupCommand(s => new ScoutController(s).finish(true)); }
+  skipScout(unitId: string) { return this.setupCommand(s => new DeploymentController(s).skipScout(unitId)); }
+  moveUnitToStrategicReserves(unitId: string, reason: string) { return this.setupCommand(s => moveUnitToReserves(s, unitId, reason)); }
+  moveUnitToGenericReserves(unitId: string, reason: string) { return this.setupCommand(s => moveUnitToReserves(s, unitId, reason, 'RESERVES')); }
+  finishBattle(): CommandResult {
+    return this.setupCommand(s => {
+      if (!battleStarted(s)) return failure('PRE_BATTLE');
+      if (actionBusy(s)) return failure('SETUP_IN_PROGRESS');
+      resolveReserveExpiration(s, s.round, this.policies.reserves, true); s.status = 'finished';
+      return { ok: true, value: undefined };
+    });
+  }
+
+  getSetupFormationAt(anchor: Position): Formation {
+    const s = this.state, tx = s.setup; if (!tx) return {};
+    const models = s.units.find(u => u.id === tx.unitId)!.models.filter(m => m.alive);
+    const origin = tx.positions[models[0]!.id];
+    return Object.fromEntries(models.map((m, i) => {
+      const p = tx.positions[m.id];
+      return [m.id, { x: anchor.x + (origin && p ? p.x - origin.x : i * 1.5), y: anchor.y + (origin && p ? p.y - origin.y : 0), z: anchor.z ?? 0 }];
+    }));
+  }
+  stageSetupFormationAt(anchor: Position) {
+    const positions = this.getSetupFormationAt(anchor);
+    return this.setupCommand(s => {
+      if (!s.setup) return failure('NO_SETUP');
+      const c = new SetupController(s);
+      for (const [id, p] of Object.entries(positions)) { const result = c.stageModel(id, p); if (!result.ok) return result; }
+      return { ok: true, value: undefined };
+    });
+  }
+  /** Bounded debug samples of complete formations, not a game-world grid or exhaustive legal region. */
+  getSetupPreviewSamples(z = 0) {
+    if (!this.state.setup) return [];
+    const controller = new SetupController(this.getState(), this.policies.setup);
+    return Array.from({ length: 108 }, (_, i) => {
+      const position = { x: ((i % 12) + 0.5) * this.state.battlefield.width / 12, y: (Math.floor(i / 12) + 0.5) * this.state.battlefield.height / 9, z };
+      const result = controller.preview(this.getSetupFormationAt(position));
+      return { position, legal: result.ok };
+    });
   }
 
 }

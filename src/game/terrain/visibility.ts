@@ -1,3 +1,4 @@
+import { onBattlefield } from '../reserves/location';
 import type { GameState, Model, Position3, TerrainFeature, Unit, VisibilityResult } from '../models';
 import { baseRadius, EPSILON } from '../utils/geometry';
 import { elevation, intervalCovered, modelHeight, prismIntervals, rayIntersectsCylinder, rectangle } from './geometry';
@@ -34,7 +35,7 @@ function featureBlocks(from: Position3, to: Position3, feature: TerrainFeature, 
 /** A provider owns one detached snapshot. Its query cache can never survive a state mutation. */
 export function createVisibilityProvider(input: GameState, detection: DetectionRangePolicy = getDetectionRange, legacyPolicy?: VisibilityPolicy): VisibilityProvider {
   const state: GameState = JSON.parse(JSON.stringify(input));
-  const models = new Map(state.units.flatMap(u => u.models).map(m => [m.id, m]));
+  const models = new Map(state.units.filter(onBattlefield).flatMap(u => u.models).map(m => [m.id, m]));
   const terrain = state.battlefield.terrain, rules = terrainRules(state);
   const cache = new Map<string, VisibilityResult>();
   function inspect(observerInput: Model, targetInput: Model, ignoreTargetUnit = false): VisibilityResult {

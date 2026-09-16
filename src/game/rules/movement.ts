@@ -1,3 +1,4 @@
+import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath, validateTerrainPosition } from '../terrain/movement';
 import { modelsOverlap } from '../terrain/geometry';
 import type { CommandFailure, CommandResult, GameState, Model, MovementPath, Position, Unit, UnitDefinition } from '../models';
@@ -10,6 +11,8 @@ export function definitionFor(state: GameState, unit: Unit): UnitDefinition {
   return definition;
 }
 export function movementPhaseError(state: GameState): CommandFailure | null {
+  if (!battleStarted(state)) return failure('PRE_BATTLE');
+  if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
   if (state.shooting) return failure('SHOOTING_IN_PROGRESS');
   if (state.phase !== 'Movement') return failure('WRONG_PHASE');
@@ -22,6 +25,8 @@ export function validateBeginMovement(state: GameState, unitId: string): Command
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
+  if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
+  if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
   if (unit.state.hasMoved) return failure('ALREADY_MOVED');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (isUnitEngaged(state, unit)) return failure('UNIT_ENGAGED');
@@ -33,7 +38,7 @@ export function validateFinalPosition(state: GameState, unit: Unit, model: Model
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
   const candidate = { ...model, position: target };
   if (!baseInsideBattlefield(candidate, state.battlefield)) return failure('OUTSIDE_BATTLEFIELD');
-  const blocker = state.units.flatMap(u => u.models)
+  const blocker = state.units.filter(onBattlefield).flatMap(u => u.models)
     .find(other => other.alive && other.id !== model.id && modelsOverlap(candidate, other));
   if (blocker) return { ...failure('BASE_OVERLAP'), blockingModelId: blocker.id };
   const terrain = validateTerrainPosition(state, candidate);

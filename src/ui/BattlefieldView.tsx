@@ -1,3 +1,4 @@
+import { onBattlefield } from '../game/reserves/location';
 import { TerrainOverlay } from './TerrainOverlay';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,10 +10,11 @@ interface Props {
   state: GameState;
   selectedModelId: string | null;
   target: { position: Position; legal: boolean } | null;
+  samples?: { position: Position; legal: boolean }[];
   onModel: (unitId: string, modelId: string) => void;
   onTarget: (position: Position) => void;
 }
-export function BattlefieldView({ state, selectedModelId, target, onModel, onTarget }: Props) {
+export function BattlefieldView({ state, selectedModelId, target, onModel, onTarget, samples = [] }: Props) {
   const [width, setWidth] = useState(0);
   const height = width * state.battlefield.height / state.battlefield.width;
   const transform = width > 0 ? coordinateTransform(state.battlefield, { width, height }) : null;
@@ -29,8 +31,9 @@ export function BattlefieldView({ state, selectedModelId, target, onModel, onTar
         backgroundColor: blocker.opaque ? '#64748b' : '#475569', opacity: 0.6 }} />;
     })}
     {transform && <TerrainOverlay state={state} transform={transform} />}
-    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive).map((model, i) => {
-      const centre = transform.gameToScreen(model.position);
+    {transform && samples.map((sample, i) => <View key={`sample-${i}`} pointerEvents="none" style={{ position: 'absolute', left: transform.gameToScreen(sample.position).x - 2, top: transform.gameToScreen(sample.position).y - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: sample.legal ? '#4ade80' : '#f87171', opacity: 0.65 }} />)}
+    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive && (onBattlefield(unit) || !!state.setup?.positions[m.id])).map((model, i) => {
+      const centre = transform.gameToScreen(state.setup?.positions[model.id] ?? model.position);
       const diameter = baseRadius(model.base) * 2 * transform.scale;
       const playerIndex = state.players.findIndex(p => p.id === unit.playerId);
       return <Pressable key={model.id} accessibilityRole="button" accessibilityLabel={`${unit.id}, model ${i + 1}`}

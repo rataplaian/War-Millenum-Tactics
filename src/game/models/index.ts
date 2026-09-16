@@ -1,3 +1,4 @@
+import type { CoreAbility, UnitLocation, ReserveRecord, ArrivalRecord, DeploymentState, SetupTransaction, ScoutMoveTransaction, SetupEventType } from '../setup/types';
 export type FactionId = string;
 export type PlayerId = string;
 export type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };
@@ -26,6 +27,7 @@ export interface Model {
   alive: boolean;
   base: BaseGeometry;
   movementUsed: number;
+  coreAbilities?: CoreAbility[];
   volume?: { kind: 'cylinder'; height: number };
 }
 export type DiceValue = { kind: 'fixed'; value: number } | { kind: 'dice'; count: number; sides: 6; modifier: number };
@@ -40,10 +42,11 @@ export interface Ability { id: string; name: string; parameters: Record<string, 
 export interface UnitStats { movement: number; toughness: number; save: number; wounds: number; leadership: number; objectiveControl: number }
 export type UnitDefinition = DeepReadonly<{
   id: string; name: string; factionId: FactionId; modelCount: number; stats: UnitStats;
+  points?: number; coreAbilities?: CoreAbility[];
   defaultBase: BaseGeometry;
   keywords: string[]; weapons: Weapon[]; abilities: Ability[]; placeholder: boolean;
 }>;
-export interface UnitState { hasAdvanced?: boolean; hasFallenBack?: boolean; hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
+export interface UnitState { battleShocked?: boolean; hasAdvanced?: boolean; hasFallenBack?: boolean; hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
 /** Mutable battle data only. Static characteristics resolve through definitionId. */
 export interface Unit {
   id: string;
@@ -53,6 +56,10 @@ export interface Unit {
   state: UnitState;
   /** Absolute player-turn index; deliberately not reset with action flags. */
   lastRangedAttackTurnIndex?: number;
+  location?: UnitLocation;
+  reserve?: ReserveRecord;
+  arrival?: ArrivalRecord;
+  moveLock?: { kind: 'UNTIL_NEXT_CHARGE'; turn: number };
 }
 export interface CoherencyRule {
   maxEdgeDistance: number;
@@ -94,6 +101,9 @@ export interface GameState {
   events: GameEvent[];
   /** Optional for loading unmodified Task 003 snapshots. */
   closeCombat?: CloseCombatState;
+  deployment?: DeploymentState;
+  setup?: SetupTransaction | null;
+  scout?: ScoutMoveTransaction | null;
 }
 export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
@@ -106,7 +116,7 @@ export type FailureReason = 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' 
   'COMBAT_IN_PROGRESS' | 'CHARGE_INELIGIBLE' | 'ALREADY_DECLARED' | 'NO_CHARGE' | 'TARGETS_REQUIRED' |
   'UNREACHABLE_TARGET' | 'IRREVERSIBLE_ACTION' | 'NO_COMBAT_MOVE' | 'NOT_CLOSER' | 'MUST_ENGAGE' |
   'BASE_CONTACT_LOCKED' | 'INVALID_FINAL_ENGAGEMENT' | 'WRONG_FIGHT_STEP' | 'WRONG_FIGHT_PLAYER' |
-  'UNIT_NOT_ELIGIBLE' | 'NO_FIGHT_SELECTED' | 'WEAPON_NOT_MELEE' | 'NO_ELIGIBLE_FIGHTERS' | 'TERRAIN_BLOCKED' | 'UNSUPPORTED_SURFACE' | 'SURFACE_NOT_ALLOWED' | 'BASE_OVERHANG' | 'INVALID_MOVEMENT_PATH' | 'CLIMB_TOO_FAR' | 'INVALID_TERRAIN';
+  'UNIT_NOT_ELIGIBLE' | 'NO_FIGHT_SELECTED' | 'WEAPON_NOT_MELEE' | 'NO_ELIGIBLE_FIGHTERS' | 'TERRAIN_BLOCKED' | 'UNSUPPORTED_SURFACE' | 'SURFACE_NOT_ALLOWED' | 'BASE_OVERHANG' | 'INVALID_MOVEMENT_PATH' | 'CLIMB_TOO_FAR' | 'INVALID_TERRAIN' | 'PRE_BATTLE' | 'WRONG_PRE_BATTLE_STEP' | 'SETUP_IN_PROGRESS' | 'NO_SETUP' | 'NOT_ON_BATTLEFIELD' | 'NOT_IN_RESERVES' | 'WRONG_DEPLOYMENT_PLAYER' | 'ALREADY_DEPLOYED' | 'OUTSIDE_DEPLOYMENT_ZONE' | 'TOO_CLOSE_TO_ENEMY' | 'TOO_CLOSE_TO_ENEMY_ZONE' | 'ENEMY_DEPLOYMENT_ZONE' | 'NOT_WITHIN_EDGE' | 'INCOMPLETE_FORMATION' | 'ABILITY_REQUIRED' | 'ABILITY_CHOICE_REQUIRED' | 'INCOMPATIBLE_ABILITY' | 'RESERVE_POINTS_LIMIT' | 'FORTIFICATION_FORBIDDEN' | 'INGRESS_TOO_EARLY' | 'ARRIVAL_MOVE_LOCK' | 'FIRST_TURN_REQUIRED' | 'SCOUTS_PENDING' | 'NO_SCOUT_MOVE' | 'INVALID_CONFIGURATION';
 export interface CommandFailure {
   ok: false;
   reason: FailureReason;
@@ -160,7 +170,7 @@ export type ShootingEvent = EventContext & (
   { type: 'shooting-cancelled' } |
   { type: 'shooting-completed' }
 );
-export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent | TerrainEvent;
+export type GameEvent = MovementEvent | ShootingEvent | CloseCombatEvent | TerrainEvent | (EventContext & { type: SetupEventType; method?: string; modelId?: string; reason?: string });
 export interface LegalTarget {
   targetUnitId: string;
   eligibleFiringModelIds: string[];

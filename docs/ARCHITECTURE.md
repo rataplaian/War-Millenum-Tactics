@@ -376,3 +376,57 @@ Schema remains 3 through additive `flow`, CP, Leadership and target-commitment f
 `ui/CommandPanel.tsx` shows steps, both CP totals, extra counters, pending rolls/abilities, shock and OC, windows, legal/illegal fixture stratagems, passes and effect expiry. It only issues engine commands. Existing battlefield, terrain, movement, shooting and close-combat screens stay in place. Android/iOS exports validate bundling; no real-device test is claimed.
 
 Rules reference: the official core PDF linked above, sections 01.06–01.07, 08.01–08.05 and 15.01, plus the explicit September-2026 Task 007 contract. The implementation deliberately includes no faction rules, official stratagem catalog, mission scoring, full Actions, transports, attached leaders, AI or persistent saves.
+
+
+## Task 008 — transport and attachment extensions
+
+### Identity, roster and source data
+
+`attachments/AttachmentController.ts` validates roster assignments before Task 006 deployment. A Bodyguard accepts one Leader and one Support by default; explicit policy overrides may change limits. Compatibility is catalog data. Support cannot remain unattached. The aggregate receives a runtime ID and derived catalog entry, while `AttachmentRecord.components` retains original unit IDs, definitions, models and starting strength. Each aggregate model records `componentUnitId` and `sourceDefinitionId`; model statistics and keywords are resolved from that source, not from the aggregate profile. Component-prefixed weapon IDs preserve ownership and prevent every model from gaining every component's equipment.
+
+`unitKeywords` and `modelKeywords` are deliberately separate. Terrain, capacity and model eligibility use the latter; unit selectors use the former. `attackToughness` uses the highest living Bodyguard Toughness and falls back to living Characters when Bodyguards are gone. An optional model Toughness override allows heterogeneous test/effect inputs. Leadership rolls likewise query each living model's source characteristic.
+
+Abilities carry UNIT/MODEL scope and source identity. Optional model abilities apply only to that model. Source-unit abilities survive source destruction until the attacking unit completes all attacks. `startedBattleAttached` preserves while-leading behavior after separation. Embarked abilities/effects are suppressed unless explicitly opted in; a passenger modifier reaches its Transport only with both `whileEmbarked` and `viaFiringDeck`. This is a typed prototype effect bridge, not a general natural-language ability interpreter.
+
+### Combat allocation and separation
+
+`AllocationGroups` creates individual Character groups and non-Character groups by Wounds/Save/Invulnerable Save. Wounded non-Characters precede other non-Characters; all non-Characters precede Characters; wounded Characters precede unwounded Characters. The existing shared sequential hit/wound/save/damage resolver uses the selected model's defence profile, including optional invulnerable saves. Precision is optional and restricted to Characters visible to actual eligible attacking models. Shooting and melee share the same resolver and allocation logic.
+
+Component destruction emits an event with only the destroyed component's original keywords. Bodyguard destruction or loss of all attached Characters schedules separation. Attack-caused separation waits for `finishAttacker`; other casualties separate after their transaction commits. Original runtime IDs return, preserving wounds, shock, action flags, location, embark records and shooting history. Living components inherit still-active unit-targeted effects; dead components have parent/move locks removed. Fight eligibility/completion lists and legacy Fights First effects are remapped. Archived runtime identities keep historical events and inactive effects resolvable after splitting. Catalog/source history remains immutable.
+
+The pre-existing attack pipeline resolves individual attacks sequentially. This task does not introduce a complete batched-save/allocation-order UI or the full universal weapon keyword pack. Defenders' equivalent allocation choices use deterministic group/model order.
+
+### Location, capacity and embark
+
+`EMBARKED` extends Task 006 location. Existing `onBattlefield` filtering removes passengers from spatial collisions, LOS, attacks and ordinary rules. `embarked` stores parent, turn, phase and pre-battle provenance. Passenger manifest and remaining capacity are pure derived queries; storing a second manifest/counter would risk divergence. Transport definitions specify maximum capacity, permitted/excluded model keywords, weighted costs, Dedicated status and Firing Deck limit. Attached passengers consume capacity for all living source models.
+
+Embark is a commit option of the existing Movement transaction. All models must finish within 3 inches, pass friendly/type/capacity checks and not have been set up this turn. Initial deployment stamps turn zero, so it does not accidentally prohibit first-turn embark. The same transaction supports minimal Normal/Advance/Fall Back modes: Advance rolls an injected D6 and records bonus allowance; Battle-shocked Fall Back uses the shared Hazard resolver. Irreversible rolls disable cancellation. These modes reuse terrain paths and existing endpoint model collisions; they do not add full intermediate-model traversal rules.
+
+Initial embark occurs in Declare Battle Formations. Passengers are excluded from deployment queues and their points count with an initially reserved Transport. Ingress marks parent history; Rapid Disembark calls the existing setup constraint factory, preserving edge/enemy-zone/distance restrictions. A Transport that never arrives and expires in reserves also loses its passengers off-field; no battlefield Emergency placement is created.
+
+### Disembark transactions and destruction
+
+`TransportController` stages coordinates outside live models. It derives the required mode:
+
+- Rapid after Normal/Ingress: wholly within 3 inches, inherited setup restrictions, no Charge this turn.
+- Tactical before movement/stationary: legal setup within 3 inches followed by a mandatory Normal/Advance movement transaction. Cancelling that follow-up does not clear the obligation.
+- Combat only when the Tactical region is proven unavailable: Hazard per model, wholly within 6 inches, restricted enemy engagement exceptions, Battle-shock and no Charge.
+- Emergency on destruction: frozen parent geometry remains valid through a mandatory queue, Hazard per model, coherent placement within 6 inches and no arbitrary cancel. Only certified impossible models are destroyed by placement failure. Parent removal waits for the last passenger.
+
+`HazardRoll` is reusable: simultaneous injected D6 rolls, failure on 1–2, one mortal wound per failure or three when every living model is MONSTER/VEHICLE. Mortal wounds spill through the deterministic allocation order. Hazard deaths, transaction outcomes and split events serialize deterministically. Expected invalid commands return domain failures against detached drafts.
+
+The default placement search is bounded to 20,000 candidate visits. It tests circular tangencies and angular/radial candidates through the existing SetupValidator, terrain, collision and coherency systems. It prioritizes nearest positions, but is not a global packing optimizer. `placementFeasibility` can certify an empty ground-only circular placement region using boundary arrangements. It deliberately ignores terrain for impossibility proofs: absent a certificate, failure is indeterminate (`PLACEMENT_SEARCH_LIMIT`), never permission to kill passengers or force Combat. Complex terrain/packing Emergency cases can remain pending until a future complete placement policy is supplied. Callers may supply a full Tactical formation to `beginDisembark` and bypass candidate enumeration while retaining all legality checks. Continuous manually entered coordinates are never snapped.
+
+### Firing Deck, Scouts and UI
+
+Firing Deck selections are temporary `ShootingTransaction` loadout entries: at most X distinct embarked models, one owned ranged weapon each, no One Shot, no already-selected passenger. All embarked units receive the turn-scoped shooting restriction, including unselected passengers. The Transport is the attacker; ordinary passenger abilities never transfer automatically. Completion/cancellation discards the loadout without modifying catalog weapons. Selection events retain provenance for historical validation.
+
+Dedicated Transports derive Scouts only if every living passenger model has Scouts, taking the minimum allowance. Existing ScoutController checks full deployment-zone containment and uses the same ScoutMoveTransaction. No new Scout geometry exists.
+
+`TransportPanel` adds manifest/capacity, unit/component/ability/allocation inspection, embark/disembark commands, Hazard output, candidate coordinates, emergency resolution and deck selection. BattlefieldView can render staged passenger candidates. Shooting/CloseCombat panels expose Precision. `transportPrototype` supplies invented profiles and pre-match assignments, not official datasheets or a full army builder. UI never mutates engine snapshots.
+
+### Snapshot and verification policy
+
+Schema stays 3: all additions are optional and legacy meaning is unchanged. `validateTransportState` rejects orphan parents, over-capacity manifests, invalid component provenance, emergency queues and altered borrowed profiles. Historical lookup is permitted for archived event/effect references; active transactions still require live runtime entities. Capacity and manifest are recomputed from serialized sources. RNG state and injected policies remain caller-owned, consistent with prior tasks.
+
+Task 008 adds 64 deterministic tests to the unchanged 427-test baseline (491 total), including both successful transactions and rejection/rollback paths, source-aware attack integration, deferred splits, Firing Deck snapshots, multiple emergency passengers, impossible oversized bases and existing Scout transaction reuse. App/engine typechecks and both mobile exports are required. No physical-device or simulator interaction has been claimed.

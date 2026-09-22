@@ -1,3 +1,4 @@
+import { historicalUnit } from '../attachments/queries';
 import type { GameState } from '../models';
 import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { COMBAT_RULES } from '../rules/closeCombat';
@@ -6,7 +7,7 @@ export function validateCloseCombatState(state: GameState): void {
   const combat = state.closeCombat;
   if (!combat) return;
   const require = (condition: unknown, message: string) => { if (!condition) throw new Error(`Invalid close combat snapshot: ${message}`); };
-  const unit = (id: string) => state.units.find(u => u.id === id);
+  const unit = (id: string) => historicalUnit(state, id);
   const ids = (values: string[]) => Array.isArray(values) && new Set(values).size === values.length && values.every(id => !!unit(id));
   require(ids(combat.declared), 'declared units');
   for (const effect of combat.effects) require(unit(effect.unitId) && effect.kind === 'FIGHTS_FIRST' && effect.expiresAt === 'END_OF_TURN' && effect.turn === state.turn, 'effect');

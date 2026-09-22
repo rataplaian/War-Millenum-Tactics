@@ -32,8 +32,8 @@ export function BattlefieldView({ state, selectedModelId, target, onModel, onTar
     })}
     {transform && <TerrainOverlay state={state} transform={transform} />}
     {transform && samples.map((sample, i) => <View key={`sample-${i}`} pointerEvents="none" style={{ position: 'absolute', left: transform.gameToScreen(sample.position).x - 2, top: transform.gameToScreen(sample.position).y - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: sample.legal ? '#4ade80' : '#f87171', opacity: 0.65 }} />)}
-    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive && (onBattlefield(unit) || !!state.setup?.positions[m.id])).map((model, i) => {
-      const centre = transform.gameToScreen(state.setup?.positions[model.id] ?? model.position);
+    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive && (onBattlefield(unit) || (!!state.setup?.positions[m.id] || !!state.transportState?.disembark?.positions[m.id]))).map((model, i) => {
+      const centre = transform.gameToScreen(state.setup?.positions[model.id] ?? state.transportState?.disembark?.positions[model.id] ?? model.position);
       const diameter = baseRadius(model.base) * 2 * transform.scale;
       const playerIndex = state.players.findIndex(p => p.id === unit.playerId);
       return <Pressable key={model.id} accessibilityRole="button" accessibilityLabel={`${unit.id}, model ${i + 1}`}

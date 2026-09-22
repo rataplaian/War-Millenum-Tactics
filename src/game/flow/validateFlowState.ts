@@ -1,3 +1,5 @@
+import { rangedLoadout } from '../transports/FiringDeck';
+import { historicalUnit } from '../attachments/queries';
 import type { GameState } from '../models';
 import { PHASES } from '../models';
 import { COMMAND_STEPS } from './types';
@@ -12,7 +14,7 @@ export function validateFlowState(s: GameState) {
     for (const m of u.models) if (m.leadership !== undefined && !integer(m.leadership, 1)) fail();
   }
   const f = s.flow; if (!f) return;
-  const player = (id: string) => s.players.some(p => p.id === id), unit = (id: string) => s.units.some(u => u.id === id);
+  const player = (id: string) => s.players.some(p => p.id === id), unit = (id: string) => !!historicalUnit(s, id);
   if ((f.started && f.firstPlayerId !== (s.deployment?.firstTurnPlayerId ?? s.players[0].id)) || !player(f.firstPlayerId) || !integer(f.phaseIndex, 1) || f.phaseIndex !== (s.turn - 1) * 5 + PHASES.indexOf(s.phase) + 1 ||
     !integer(f.rules.maximumBattleRounds, 1) || f.rules.maximumBattleRounds < s.round || !integer(f.rules.maxExtraCpPerBattleRound) ||
     !integer(f.nextEffectId, 1) || !integer(f.nextWindowId, 1) || typeof f.started !== 'boolean' || typeof f.missionHookStarted !== 'boolean' ||
@@ -44,5 +46,5 @@ export function validateFlowState(s: GameState) {
   }
   for (const u of f.usage) if (!u.stratagemId || !player(u.playerId) || !u.targetIds.length || new Set(u.targetIds).size !== u.targetIds.length || u.targetIds.some(id => !unit(id)) || !integer(u.phaseIndex, 1) || u.phaseIndex > f.phaseIndex || !integer(u.turn, 1) || u.turn > s.turn || !integer(u.round, 1) || u.round > s.round) fail();
   const selected = s.shooting?.selectedTarget;
-  if (selected && (!unit(selected.targetUnitId) || !s.definitions.find(d => d.id === s.units.find(u => u.id === s.shooting!.unitId)!.definitionId)?.weapons.some(w => w.id === selected.weaponId && w.kind === 'ranged') || s.shooting!.firedWeaponIds.includes(selected.weaponId))) fail();
+  if (selected && (!unit(selected.targetUnitId) || !rangedLoadout(s, s.units.find(u => u.id === s.shooting!.unitId)!).some(w => w.id === selected.weaponId && w.kind === 'ranged') || s.shooting!.firedWeaponIds.includes(selected.weaponId))) fail();
 }

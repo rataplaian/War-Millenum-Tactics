@@ -10,7 +10,7 @@ export interface StratagemDefinition {
   resolverId: string;
   effect?: Omit<EffectInput, 'target'>;
   usageLimits?: { perPhase?: number; perTurn?: number; perBattle?: number };
-  overrides?: { allowBattleShockedTarget?: boolean; allowMultipleOnTarget?: boolean };
+  overrides?: { allowBattleShockedTarget?: boolean; allowEmbarkedTarget?: boolean; allowMultipleOnTarget?: boolean };
 }
 export interface StratagemPolicies {
   definitions?: readonly StratagemDefinition[];

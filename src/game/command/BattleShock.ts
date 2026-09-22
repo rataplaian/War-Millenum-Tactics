@@ -1,3 +1,4 @@
+import { modelDefinition } from '../attachments/queries';
 import type { GameState, Unit } from '../models';
 import { rollD6s, type RandomSource } from '../utils/dice';
 import { effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
@@ -15,11 +16,10 @@ export function resolveLeadershipRoll(characteristics: readonly number[], rng: R
   return { rolls, total, success: characteristics.some(ld => total >= ld) };
 }
 export function resolveBattleShockRoll(s: GameState, u: Unit, rng: RandomSource) {
-  const base = s.definitions.find(d => d.id === u.definitionId)!.stats.leadership;
-  const characteristics = u.models.filter(m => m.alive).map(m => effectiveCharacteristic(s, u.id, 'LEADERSHIP', m.leadership ?? base));
+  const characteristics = u.models.filter(m => m.alive).map(m => effectiveCharacteristic(s, u.id, 'LEADERSHIP', m.leadership ?? modelDefinition(s, u, m).stats.leadership, m.id));
   return resolveLeadershipRoll(characteristics, rng);
 }
-export const canStartAction = (u: Unit) => !u.state.battleShocked && onBattlefield(u) && u.models.some(m => m.alive);
+export const canStartAction = (u: Unit) => !u.state.battleShocked && !u.state.hasAdvanced && !u.state.hasFallenBack && onBattlefield(u) && u.models.some(m => m.alive);
 export const canCompleteAction = canStartAction;
 /** Shared gate for the future Fall Back controller: Battle-shock forbids Ordered Retreat. */
 export function fallBackOptions(s: GameState, u: Unit) {

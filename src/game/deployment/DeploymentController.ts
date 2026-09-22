@@ -1,3 +1,4 @@
+import { validateRoster } from '../attachments/AttachmentController';
 import type { CommandResult, GameState, Unit } from '../models';
 import type { DeploymentAbilityChoice } from '../setup/types';
 import { failure, definitionFor } from '../rules/movement';
@@ -7,7 +8,7 @@ import { reservePoints } from '../reserves/ReservePolicy';
 import { setupEvent } from '../setup/events';
 const ok = (): CommandResult => ({ ok: true, value: undefined });
 export function pendingDeployment(s: GameState): Unit[] {
-  return s.units.filter(u => u.models.some(m => m.alive) && !s.deployment?.deployed.includes(u.id) && !s.deployment?.initialReserveIds.includes(u.id));
+  return s.units.filter(u => u.location !== 'EMBARKED' && u.models.some(m => m.alive) && !s.deployment?.deployed.includes(u.id) && !s.deployment?.initialReserveIds.includes(u.id));
 }
 export function nextDeploymentPlayer(s: GameState, preferred = s.deployment!.nextPlayerId): string | null {
   const pending = pendingDeployment(s);
@@ -27,7 +28,7 @@ export class DeploymentController {
     const d = this.s.deployment;
     if (!d || d.stage === 'BATTLE_STARTED') return failure('WRONG_PRE_BATTLE_STEP');
     if (actionBusy(this.s)) return failure('SETUP_IN_PROGRESS');
-    if (d.stage === 'PRE_BATTLE') d.stage = 'DECLARE_BATTLE_FORMATIONS';
+    if (d.stage === 'PRE_BATTLE') { const roster = validateRoster(this.s); if (!roster.ok) return roster; d.stage = 'DECLARE_BATTLE_FORMATIONS'; }
     else if (d.stage === 'DECLARE_BATTLE_FORMATIONS') { d.stage = 'DEPLOY_ARMIES'; d.nextPlayerId = nextDeploymentPlayer(this.s, d.firstDeploymentPlayerId) ?? d.firstDeploymentPlayerId; }
     else if (d.stage === 'DEPLOY_ARMIES') {
       if (pendingDeployment(this.s).length) return failure('INCOMPLETE_FORMATION');
@@ -62,12 +63,13 @@ export class DeploymentController {
     if (!d || d.stage !== 'DECLARE_BATTLE_FORMATIONS') return failure('WRONG_PRE_BATTLE_STEP');
     if (actionBusy(this.s)) return failure('SETUP_IN_PROGRESS');
     if (!u) return failure('UNIT_NOT_FOUND');
+    if (u.location === 'EMBARKED') return failure('INVALID_PASSENGER');
     if (!u.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
     const definition = definitionFor(this.s, u);
     if (selected && definition.keywords.some(k => k.toUpperCase() === 'FORTIFICATION')) return failure('FORTIFICATION_FORBIDDEN');
     if (definition.points === undefined) return failure('INVALID_CONFIGURATION');
     const points = reservePoints(this.s, u.playerId);
-    if (selected && !d.initialReserveIds.includes(unitId) && points.used + definition.points > points.limit + 1e-9) return failure('RESERVE_POINTS_LIMIT');
+    if (selected && !d.initialReserveIds.includes(unitId) && points.used + definition.points + this.s.units.filter(p => p.embarked?.transportId === unitId).reduce((n, p) => n + (definitionFor(this.s, p).points ?? 0), 0) > points.limit + 1e-9) return failure('RESERVE_POINTS_LIMIT');
     d.initialReserveIds = d.initialReserveIds.filter(id => id !== unitId);
     if (selected) {
       d.initialReserveIds.push(unitId); u.location = 'STRATEGIC_RESERVES';

@@ -1,3 +1,5 @@
+import { rangedLoadout } from '../transports/FiringDeck';
+import { modelHasWeapon } from '../attachments/queries';
 import { effectiveFlag } from '../effects/EffectEngine';
 import { temporalBlock } from '../flow/TimingWindows';
 import { battleStarted, onBattlefield, setupBusy } from '../reserves/location';
@@ -26,7 +28,7 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
-  if (effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
+  if ((unit.cannotShootUntilTurn ?? 0) >= state.turn || unit.state.hasFallenBack || effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasShot) return failure('ALREADY_SHOT');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (!normalShootingAllowed(state, unit)) return failure('UNIT_ENGAGED');
@@ -35,15 +37,15 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
 export function availableRangedWeapons(state: GameState, unitId: string): CommandResult<RangedWeapon[]> {
   const shooter = validateShooter(state, unitId);
   if (!shooter.ok) return shooter;
-  const weapons = definitionFor(state, shooter.value).weapons.filter((w): w is RangedWeapon => w.kind === 'ranged');
+  const weapons = rangedLoadout(state, shooter.value);
   if (!weapons.length) return failure('NO_RANGED_WEAPONS');
   return { ok: true, value: weapons.filter(w => !state.shooting?.firedWeaponIds.includes(w.id)) };
 }
 export function validateRangedWeapon(state: GameState, unitId: string, weaponId: string): CommandResult<RangedWeapon> {
   const shooter = validateShooter(state, unitId);
   if (!shooter.ok) return shooter;
-  const weapon = definitionFor(state, shooter.value).weapons.find(w => w.id === weaponId);
-  if (!weapon) return failure('WEAPON_NOT_FOUND');
+  const weapon = rangedLoadout(state, shooter.value).find(w => w.id === weaponId);
+  if (!weapon) return failure(definitionFor(state, shooter.value).weapons.some(w => w.id === weaponId) ? 'WEAPON_NOT_RANGED' : 'WEAPON_NOT_FOUND');
   if (weapon.kind !== 'ranged') return failure('WEAPON_NOT_RANGED');
   if (state.shooting?.firedWeaponIds.includes(weaponId)) return failure('WEAPON_ALREADY_FIRED');
   return { ok: true, value: weapon };
@@ -61,7 +63,7 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
   if (!onBattlefield(target)) return failure('NOT_ON_BATTLEFIELD');
   const livingTargets = target.models.filter(m => m.alive);
   if (!livingTargets.length) return failure('TARGET_DESTROYED');
-  const livingShooters = shooter.models.filter(m => m.alive);
+  const livingShooters = shooter.models.filter(m => m.alive && (weaponId.startsWith('deck:') || modelHasWeapon(state, shooter, m, weaponId)));
   let nearestDistance = Infinity;
   let anyInRange = false;
   const eligibleFiringModelIds = livingShooters.filter(model => {

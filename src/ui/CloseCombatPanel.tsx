@@ -51,9 +51,9 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
         <Text style={{ color: '#fff' }}>Fighting: {label(chosen.id)}</Text>
         {enemies.filter(u => u.playerId !== chosen.playerId).map(target => <View key={target.id} style={{ gap: 4 }}>
           <Button title={`${targets.includes(target.id) ? '✓ ' : ''}OVERRUN TARGET: ${label(target.id)}`} onPress={() => toggle(target.id)} />
-          {meleeWeapons(state, chosen).map(w => <Button key={w.id} title={`${w.name} → ${label(target.id)}`}
+          {meleeWeapons(state, chosen).map(w => <View key={w.id}><Button key={w.id} title={`${w.name} → ${label(target.id)}`}
             disabled={!getModelsEligibleToFight(state, chosen, target).some(m => !fight!.selected!.usedModelIds.includes(m.id))}
-            onPress={() => run(engine.meleeAttack(w.id, target.id, rng), 'Melee resolved. See wounds and combat log.')} />)}
+            onPress={() => run(engine.meleeAttack(w.id, target.id, rng), 'Melee resolved. See wounds and combat log.')} />{engine.precisionTargets(chosen.id, w.id, target.id).map(id => <Button key={id} title={`PRECISION ${w.name} → ${id}`} onPress={() => run(engine.meleeAttack(w.id, target.id, rng, id), 'Precision melee resolved.')} />)}</View>)}
         </View>)}
         <Button title="OVERRUN PILE IN" onPress={() => run(engine.beginOverrun(targets))} />
         <Button title="CANCEL FIGHT SELECTION" disabled={!!fight?.selected?.hasRolled || !!fight?.selected?.overrunDone} onPress={() => run(engine.cancelFightUnit())} />

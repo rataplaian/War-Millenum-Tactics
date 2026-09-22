@@ -31,9 +31,26 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 007
+## Current status: Task 008
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
+
+### Transports and Attached Units (Task 008)
+
+Select **TRANSPORTS** for invented capacity-6/Firing-Deck-2 and capacity-12/Dedicated fixtures, a five-model Bodyguard, compatible Leader and Support, and an opposing Bodyguard with different Toughness. The roster is assembled before deployment; the standard deployment and Command panels remain in use.
+
+- During Declare Battle Formations select a passenger and **START EMBARKED**. The manifest derives capacity from living models and their own keywords. Only the Transport deploys.
+- Movement supports Normal, Advance and Fall Back entry points through the same transaction. **COMPLETE MOVE + EMBARK** validates every passenger within 3 inches and commits removal atomically.
+- **DISEMBARK** determines Rapid, Tactical or Combat. Tactical provides a legal candidate formation and blocks progression until the required Normal/Advance move is completed. Rapid inherits Ingress restrictions. Combat/Emergency roll injected Hazard dice and cannot cancel after rolling.
+- A destroyed Transport retains its frozen geometry and passenger queue until all Emergency Disembarks resolve. The UI shows mode, rolls, candidates and pending movement. Coordinates can be edited or tapped; only engine confirmation commits them.
+- Select passenger model/weapon options, then **SHOOT WITH FIRING DECK**. Borrowed weapons use the existing Shooting panel and disappear at completion. Both shooting and melee expose optional visible-Character Precision selection.
+- The transport panel displays component identities, model-derived keyword union, ability sources, attack Toughness, allocation groups and completed splits. The engine defers attack-induced separation until the attacking unit finishes.
+
+Schema remains 3 with optional additive extensions; old fixtures do not gain attachments or transports implicitly. Validation rejects orphan parents, invalid capacity/provenance and corrupt temporary loadouts. Manifests/capacity are derived from serialized passenger state instead of duplicated counters.
+
+Task 008 validation: **491 tests** (427 previous tests unchanged + 64 new tests), app and isolated-engine TypeScript checks, Android and iOS exports. No real-device testing is claimed.
+
+Automatic placement is a bounded candidate search, not a complete continuous packing solver. Ground-only circular arrangements can certify an individually impossible placement. Unresolved packing/terrain cases return `PLACEMENT_SEARCH_LIMIT` without casualties or committing an illegal fallback; API callers can provide a complete legal Tactical formation. Emergency placement prioritizes nearest candidates, but does not prove a global optimum across arbitrary terrain. See ARCHITECTURE for the exact limits.
 
 ### Command, CP and timing (Task 007)
 
@@ -111,7 +128,7 @@ Snapshots remain schema 3: optional terrain, deployment/reserve transactions, lo
 
 Generic RESERVES require an explicit arrival policy. Oversized bases that cannot fit an edge constraint are rejected unless a setup policy supplies a fallback; no transport gameplay is implemented. Off-field positions are retained as inert history and never participate in battlefield queries.
 
-No Advance/Fall Back actions, complete Actions system, official stratagem catalog, faction rules, complete weapon keyword pack, invulnerable saves, Feel No Pain, transports, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Battle-shock supplies a shared Ordered Retreat/Desperate Escape eligibility hook; it does not add the absent Fall Back movement controller. Hit/wound timing identifiers are extension points; individual attack rolls still resolve atomically and do not offer reroll interruptions. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
+No complete Actions system, official stratagem catalog, faction rules, complete weapon keyword pack, Feel No Pain, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Task 008 adds minimal Advance/Fall Back entry points for transport interactions; intermediate miniature crossing remains the existing endpoint-collision approximation. Invulnerable saves are supported in allocation groups. Hit/wound timing identifiers are extension points; individual attack rolls still resolve atomically and do not offer reroll interruptions. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 

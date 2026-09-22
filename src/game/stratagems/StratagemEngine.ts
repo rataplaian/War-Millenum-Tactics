@@ -1,3 +1,4 @@
+import { unitKeywords } from '../attachments/queries';
 import type { CommandResult, GameState } from '../models';
 import { failure } from '../rules/movement';
 import { onBattlefield } from '../reserves/location';
@@ -22,7 +23,8 @@ export class StratagemEngine {
       const u = s.units.find(u => u.id === id);
       if (!u || (d.target.relation === 'FRIENDLY' && u.playerId !== playerId) || (d.target.relation === 'ENEMY' && u.playerId === playerId) ||
         (d.target.selectedTargetOnly && w.targetUnitId !== id)) return failure('INVALID_TARGET');
-      const keywords = s.definitions.find(x => x.id === u.definitionId)!.keywords.map(k => k.toUpperCase());
+      if (u.location === 'EMBARKED' && !d.overrides?.allowEmbarkedTarget) return failure('NOT_ON_BATTLEFIELD');
+      const keywords = unitKeywords(s, u);
       if (d.target.keywords?.some(k => !keywords.includes(k.toUpperCase())) || d.conditions?.some(c =>
         (c === 'ON_BATTLEFIELD' && !onBattlefield(u)) || (c === 'ALIVE' && !u.models.some(m => m.alive)) || (c === 'NOT_SHOT' && u.state.hasShot))) return failure('UNIT_NOT_ELIGIBLE');
     }

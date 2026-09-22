@@ -14,5 +14,5 @@ export function shouldDestroyUnarrivedReserveUnit(_s: GameState, u: Unit): boole
 export const shouldDestroyReserveAtBattleEnd = (_s: GameState, u: Unit) => ['RESERVES', 'STRATEGIC_RESERVES'].includes(locationOf(u));
 export function reservePoints(s: GameState, playerId: string) {
   const ids = s.deployment?.initialReserveIds ?? [];
-  return { used: s.units.filter(u => u.playerId === playerId && ids.includes(u.id)).reduce((n, u) => n + (s.definitions.find(d => d.id === u.definitionId)!.points ?? 0), 0), limit: (s.deployment?.pointsLimit ?? 0) * reserveRules(s).strategicReservePointsLimitRatio };
+  return { used: s.units.filter(u => u.playerId === playerId && (ids.includes(u.id) || (u.location === 'EMBARKED' && ids.includes(u.embarked!.transportId)))).reduce((n, u) => n + (s.definitions.find(d => d.id === u.definitionId)!.points ?? 0), 0), limit: (s.deployment?.pointsLimit ?? 0) * reserveRules(s).strategicReservePointsLimitRatio };
 }

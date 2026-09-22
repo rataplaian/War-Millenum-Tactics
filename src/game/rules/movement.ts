@@ -1,3 +1,4 @@
+import { modelDefinition } from '../attachments/queries';
 import { temporalBlock } from '../flow/TimingWindows';
 import { effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
@@ -15,16 +16,17 @@ export function definitionFor(state: GameState, unit: Unit): UnitDefinition {
 export function movementPhaseError(state: GameState): CommandFailure | null {
   const block = temporalBlock(state); if (block) return block;
   if (!battleStarted(state)) return failure('PRE_BATTLE');
-  if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
+  if (setupBusy(state) && !(state.transportState?.tacticalFollowUp && !state.transportState.disembark && !state.transportState.destroyed.length && !state.setup && !state.scout)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
   if (state.shooting) return failure('SHOOTING_IN_PROGRESS');
   if (state.phase !== 'Movement') return failure('WRONG_PHASE');
   return null;
 }
-export function validateBeginMovement(state: GameState, unitId: string): CommandResult<Unit> {
+export function validateBeginMovement(state: GameState, unitId: string, moveType: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' = 'NORMAL_MOVE'): CommandResult<Unit> {
   const error = movementPhaseError(state);
   if (error) return error;
   if (state.movement) return failure('MOVEMENT_IN_PROGRESS');
+  if (state.transportState?.tacticalFollowUp && (state.transportState.tacticalFollowUp !== unitId || moveType === 'FALL_BACK_MOVE')) return failure('TACTICAL_MOVE_REQUIRED');
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
@@ -33,7 +35,7 @@ export function validateBeginMovement(state: GameState, unitId: string): Command
   if (effectiveFlag(state, unit.id, 'CANNOT_MOVE')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasMoved) return failure('ALREADY_MOVED');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
-  if (isUnitEngaged(state, unit)) return failure('UNIT_ENGAGED');
+  if (moveType === 'FALL_BACK_MOVE' ? !isUnitEngaged(state, unit) : isUnitEngaged(state, unit)) return failure('UNIT_ENGAGED');
   return { ok: true, value: unit };
 }
 export interface MoveDetails { distance: number; totalUsed: number; remaining: number }
@@ -64,7 +66,7 @@ export function validateModelMove(state: GameState, modelId: string, target: Pos
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
   const terrainPath = validateTerrainPath(state, model, target, path);
   const distance = terrainPath.ok ? terrainPath.value.totalMovementDistance : distanceTravelled(model.position, target);
-  const allowance = effectiveCharacteristic(state, unit.id, 'MOVE', definitionFor(state, unit).stats.movement);
+  const allowance = effectiveCharacteristic(state, unit.id, 'MOVE', modelDefinition(state, unit, model).stats.movement, model.id) + (state.movement.bonus ?? 0);
   const remaining = Math.max(0, allowance - model.movementUsed);
   if (distance > remaining + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining };
   if (!terrainPath.ok) return terrainPath;

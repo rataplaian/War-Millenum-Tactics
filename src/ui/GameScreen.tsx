@@ -1,3 +1,5 @@
+import { TransportPanel } from './TransportPanel';
+import { createTransportTestMatch } from '../game/data/transportPrototype';
 import { CommandPanel } from './CommandPanel';
 import { createDeploymentTestMatch } from '../game/data/deploymentPrototype';
 import { DeploymentPanel } from './DeploymentPanel';
@@ -39,7 +41,7 @@ export function GameScreen() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
-  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT'>('DEPLOYMENT');
+  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT' | 'TRANSPORTS'>('DEPLOYMENT');
   const [observerId, setObserverId] = useState<string | null>('unit-1:model:1');
   const [targetZ, setTargetZ] = useState(0);
   function report(result: CommandResult<unknown>, success: string) {
@@ -48,7 +50,8 @@ export function GameScreen() {
   }
   function start() {
     setSelectedModelId(null); setTarget(null); setTargetZ(0);
-    engine.current = GameEngine.create(scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
+    engine.current = GameEngine.create(scenario === 'TRANSPORTS' ? createTransportTestMatch() : scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
+    if (scenario === 'TRANSPORTS') engine.current.configureAttachments([{ id: 'attached', bodyguardId: 'bodyguard', leaderIds: ['leader'], supportIds: ['support'] }]);
     engine.current.enableMatchFlow();
     rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
@@ -92,10 +95,11 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
+      {state.attachments && <TransportPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />}
       {state.deployment && <DeploymentPanel state={state} engine={engine.current!} report={report} />}
       {battleStarted(state) && !state.setup && <>
       <CommandPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />

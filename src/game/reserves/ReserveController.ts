@@ -22,6 +22,11 @@ export function resolveReserveExpiration(s: GameState, completedRound: number, p
   for (const u of s.units) if ((endBattle ? ['RESERVES', 'STRATEGIC_RESERVES'].includes(locationOf(u)) : locationOf(u) === 'STRATEGIC_RESERVES') && shouldDestroy(s, u)) {
     u.location = 'DESTROYED'; delete u.moveLock;
     for (const m of u.models) { m.alive = false; m.woundsRemaining = 0; }
+    for (const passenger of s.units.filter(p => p.embarked?.transportId === u.id)) {
+      passenger.location = 'DESTROYED'; delete passenger.embarked; delete passenger.moveLock;
+      for (const m of passenger.models) { m.alive = false; m.woundsRemaining = 0; }
+      setupEvent(s, passenger, 'reserve-unit-destroyed', { reason: 'parent-never-arrived' });
+    }
     setupEvent(s, u, 'reserve-unit-destroyed', { reason: endBattle ? 'end-of-battle' : 'arrival-deadline' });
   }
 }

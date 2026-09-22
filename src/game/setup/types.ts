@@ -1,9 +1,9 @@
 import type { MovementTransaction, Polygon, Position } from '../models';
 export type CoreAbility = { kind: 'INFILTRATORS' | 'DEEP_STRIKE' } | { kind: 'SCOUTS'; distance: number };
-export type UnitLocation = 'BATTLEFIELD' | 'STRATEGIC_RESERVES' | 'RESERVES' | 'DESTROYED';
+export type UnitLocation = 'EMBARKED' | 'BATTLEFIELD' | 'STRATEGIC_RESERVES' | 'RESERVES' | 'DESTROYED';
 export type DeploymentAbilityChoice = 'SCOUTS' | 'INFILTRATORS';
 export type IngressMethod = 'STRATEGIC_EDGE' | 'DEEP_STRIKE';
-export type MoveType = 'NORMAL_MOVE' | 'INGRESS_MOVE' | 'SCOUT_MOVE';
+export type MoveType = 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' | 'INGRESS_MOVE' | 'SCOUT_MOVE' | 'DISEMBARK_MOVE' | 'EMERGENCY_DISEMBARK_MOVE';
 export interface DeploymentZone { id: string; playerId: string; footprint: Polygon; metadata: Record<string, string | number | boolean> }
 export interface ReserveRules {
   strategicReservePointsLimitRatio: number; standardIngressMinimumRound: number;

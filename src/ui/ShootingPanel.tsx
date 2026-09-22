@@ -14,12 +14,13 @@ const textStyle = { color: '#e5e7eb', fontSize: 15 };
 export function ShootingPanel({ state, engine, rng, report }: Props) {
   const [weaponId, setWeaponId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string | null>(null);
+  const [precision, setPrecision] = useState<string | undefined>();
   const action = state.shooting;
   const weapons = action ? engine.getRangedWeapons(action.unitId) : null;
   const targets = action && weaponId ? engine.getLegalTargets(action.unitId, weaponId) : null;
   const weaponAvailable = weapons?.ok && weapons.value.some(w => w.id === weaponId);
   const targetAvailable = targets?.ok && targets.value.some(t => t.targetUnitId === targetId);
-  function clear() { setWeaponId(null); setTargetId(null); }
+  function clear() { setWeaponId(null); setTargetId(null); setPrecision(undefined); }
   return <View style={{ gap: 10, padding: 12, backgroundColor: '#1f2937' }}>
     <Text style={textStyle}>Shooting · Select unit → weapon → target → FIRE</Text>
     {!action && state.units.filter(u => u.playerId === state.activePlayerId).map(unit => {
@@ -32,7 +33,7 @@ export function ShootingPanel({ state, engine, rng, report }: Props) {
       <Text style={textStyle}>Firing unit: {state.definitions.find(d => d.id === state.units.find(u => u.id === action.unitId)!.definitionId)!.name}</Text>
       {weapons?.ok && weapons.value.map(weapon => <Button key={weapon.id}
         title={`${weaponId === weapon.id ? 'SELECTED: ' : ''}${weapon.name} · ${weapon.range}″`} disabled={!!action.selectedTarget}
-        onPress={() => { setWeaponId(weapon.id); setTargetId(null); }} />)}
+        onPress={() => { setWeaponId(weapon.id); setTargetId(null); setPrecision(undefined); }} />)}
       {weapons?.ok && !weapons.value.length && <Text style={textStyle}>All ranged profiles used. Complete shooting.</Text>}
       {targets?.ok && targets.value.map(target => {
         const unit = state.units.find(u => u.id === target.targetUnitId)!;
@@ -43,9 +44,10 @@ export function ShootingPanel({ state, engine, rng, report }: Props) {
         </View>;
       })}
       {targets?.ok && !targets.value.length && <Text style={textStyle}>No legal targets for this weapon.</Text>}
+      {action && weaponId && targetId && <><Button title="NORMAL ALLOCATION" onPress={() => setPrecision(undefined)} />{engine.precisionTargets(action.unitId, weaponId, targetId).map(id => <Button key={id} title={`${precision === id ? 'SELECTED' : 'PRECISION'} ${id}`} onPress={() => setPrecision(id)} />)}</>}
       <Button title="FIRE" disabled={!weaponAvailable || !targetAvailable || !!state.flow?.window} onPress={() => {
         if (!weaponId || !targetId) return;
-        const result = engine.fireWeapon(weaponId, targetId, rng);
+        const result = engine.fireWeapon(weaponId, targetId, rng, precision);
         report(result, 'Weapon resolved. See the battle log below.');
         if (result.ok) clear();
       }} />

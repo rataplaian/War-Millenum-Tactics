@@ -1,3 +1,4 @@
+import { sourceModifier, sourceFlag } from '../attachments/queries';
 import type { GameState, Unit } from '../models';
 import type { Characteristic, Effect, EffectInput } from './types';
 import { flowEvent } from '../flow/events';
@@ -19,13 +20,13 @@ export function removeEffect(s: GameState, id: string) {
   e.active = false; flowEvent(s, 'TEMPORARY_EFFECT_EXPIRED', { effectId: id }, e.target.unitId);
 }
 export function activeEffects(s: GameState, unitId: string): Effect[] {
-  const all = (s.flow?.effects ?? []).filter(e => e.active && e.target.unitId === unitId);
+  const all = (s.flow?.effects ?? []).filter(e => e.active && e.target.unitId === unitId && (s.units.find(u => u.id === unitId)?.location !== 'EMBARKED' || e.whileEmbarked));
   return all.filter(e => e.stacking !== 'HIGHEST_ONLY' || !all.some(x => x.stacking === 'HIGHEST_ONLY' && key(x) === key(e) &&
     x.payload.kind === 'MODIFIER' && e.payload.kind === 'MODIFIER' && (x.payload.value > e.payload.value || (x.payload.value === e.payload.value && all.indexOf(x) < all.indexOf(e)))));
 }
 export const modifierDelta = (s: GameState, unitId: string, characteristic: Characteristic) => activeEffects(s, unitId).reduce((sum, e) => sum + (e.payload.kind === 'MODIFIER' && e.payload.characteristic === characteristic ? e.payload.value : 0), 0);
-export function effectiveCharacteristic(s: GameState, unitId: string, characteristic: Characteristic, base: number): number {
-  const n = base + modifierDelta(s, unitId, characteristic);
+export function effectiveCharacteristic(s: GameState, unitId: string, characteristic: Characteristic, base: number, modelId?: string): number {
+  const n = base + modifierDelta(s, unitId, characteristic) + sourceModifier(s, unitId, characteristic, modelId);
   if (characteristic === 'BS' || characteristic === 'WS') return Math.max(2, Math.min(6, n));
   if (characteristic === 'SAVE') return Math.max(2, Math.min(7, n));
   if (characteristic === 'LEADERSHIP') return Math.max(4, Math.min(9, n));
@@ -34,7 +35,7 @@ export function effectiveCharacteristic(s: GameState, unitId: string, characteri
 }
 export function effectiveFlag(s: GameState, unitId: string, flag: string, fallback = false): boolean {
   const found = activeEffects(s, unitId).filter(e => e.payload.kind === 'FLAG' && e.payload.flag === flag).at(-1);
-  return found?.payload.kind === 'FLAG' ? found.payload.value : fallback;
+  return found?.payload.kind === 'FLAG' ? found.payload.value : sourceFlag(s, unitId, flag) ?? fallback;
 }
 export type ExpiryPoint = 'PHASE_END' | 'TURN_END' | 'ROUND_END' | 'COMMAND_START' | 'COMMAND_END';
 export function expireEffects(s: GameState, point: ExpiryPoint) {

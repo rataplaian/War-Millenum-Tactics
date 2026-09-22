@@ -1,3 +1,6 @@
+import type { AttachmentDefinition, AttachmentRecord } from '../attachments/types';
+import type { TransportCapacityDefinition, EmbarkedState, TransportState, FiringDeckSelection } from '../transports/types';
+import type { EffectPayload } from '../effects/types';
 import type { MatchFlowState, FlowEvent } from '../flow/types';
 import type { CoreAbility, UnitLocation, ReserveRecord, ArrivalRecord, DeploymentState, SetupTransaction, ScoutMoveTransaction, SetupEventType } from '../setup/types';
 export type FactionId = string;
@@ -21,6 +24,10 @@ export type BaseGeometry = { kind: 'circle'; diameterMm: number };
 export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
+  abilities?: Ability[];
+  toughness?: number;
+  sourceDefinitionId?: string;
+  componentUnitId?: string;
   id: string;
   unitId: string;
   woundsRemaining: number;
@@ -40,10 +47,11 @@ interface WeaponProfile {
   armourPenetration: number; damage: DiceValue; traits: WeaponTrait[];
 }
 export type Weapon = (WeaponProfile & { kind: 'ranged'; range: number }) | (WeaponProfile & { kind: 'melee'; range: null });
-export interface Ability { id: string; name: string; parameters: Record<string, string | number | boolean> }
+export interface Ability { scope?: 'UNIT' | 'MODEL'; effect?: EffectPayload; whileLeading?: boolean; whileEmbarked?: boolean; viaFiringDeck?: boolean; id: string; name: string; parameters: Record<string, string | number | boolean> }
 export interface UnitStats { movement: number; toughness: number; save: number; wounds: number; leadership: number; objectiveControl: number }
 export type UnitDefinition = DeepReadonly<{
   id: string; name: string; factionId: FactionId; modelCount: number; stats: UnitStats;
+  attachment?: AttachmentDefinition; transport?: TransportCapacityDefinition; invulnerableSave?: number;
   points?: number; coreAbilities?: CoreAbility[];
   defaultBase: BaseGeometry;
   keywords: string[]; weapons: Weapon[]; abilities: Ability[]; placeholder: boolean;
@@ -51,6 +59,14 @@ export type UnitDefinition = DeepReadonly<{
 export interface UnitState { battleShocked?: boolean; hasAdvanced?: boolean; hasFallenBack?: boolean; hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
 /** Mutable battle data only. Static characteristics resolve through definitionId. */
 export interface Unit {
+  advanceBonus?: { turn: number; value: number };
+  startedBattleAttached?: boolean;
+  embarked?: EmbarkedState;
+  setupAtTurn?: number;
+  lastMove?: { kind: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' | 'INGRESS_MOVE' | 'DISEMBARK_MOVE'; turn: number; phase: Phase };
+  cannotChargeUntilTurn?: number;
+  cannotShootUntilTurn?: number;
+  selectedToShootAt?: { turn: number; phase: Phase };
   id: string;
   definitionId: string;
   playerId: PlayerId;
@@ -71,6 +87,10 @@ export interface CoherencyRule {
 }
 export interface SpatialRules { coherency: CoherencyRule; engagementDistance: number }
 export interface MovementTransaction {
+  moveType?: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE';
+  bonus?: number;
+  irreversible?: boolean;
+  desperate?: boolean;
   unitId: string;
   originals: { modelId: string; position: Position; movementUsed: number }[];
 }
@@ -85,6 +105,8 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  attachments?: AttachmentRecord[];
+  transportState?: TransportState;
   flow?: MatchFlowState;
   schemaVersion: 3;
   id: string;
@@ -108,7 +130,7 @@ export interface GameState {
   setup?: SetupTransaction | null;
   scout?: ScoutMoveTransaction | null;
 }
-export type FailureReason = 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
+export type FailureReason = 'INVALID_ATTACHMENT' | 'SUPPORT_REQUIRES_BODYGUARD' | 'NOT_TRANSPORT' | 'INVALID_PASSENGER' | 'TRANSPORT_CAPACITY' | 'TOO_FAR_FROM_TRANSPORT' | 'SET_UP_THIS_TURN' | 'NOT_EMBARKED' | 'DISEMBARK_NOT_ALLOWED' | 'DISEMBARK_IN_PROGRESS' | 'NO_DISEMBARK' | 'PLACEMENT_SEARCH_LIMIT' | 'TACTICAL_MOVE_REQUIRED' | 'FIRING_DECK_LIMIT' | 'ONE_SHOT_FORBIDDEN' | 'PRECISION_TARGET_INVALID' | 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
   'MODEL_NOT_IN_UNIT' | 'MODEL_DEAD' | 'INVALID_POSITION' | 'EXCEEDS_ALLOWANCE' |
   'OUTSIDE_BATTLEFIELD' | 'BASE_OVERLAP' | 'UNIT_ENGAGED' | 'ENEMY_ENGAGEMENT' | 'INCOHERENT' |
@@ -132,6 +154,7 @@ export type CommandResult<T = undefined> = { ok: true; value: T } | CommandFailu
 
 export type RangedWeapon = DeepReadonly<Extract<Weapon, { kind: 'ranged' }>>;
 export interface ShootingTransaction {
+  firingDeck?: FiringDeckSelection[];
   unitId: string;
   selectedTarget?: { weaponId: string; targetUnitId: string };
   firedWeaponIds: string[];
@@ -161,6 +184,7 @@ export interface WeaponResolution {
   woundRolls: number[];
   wounds: number;
   saveResults: SaveResult[];
+  woundTargets?: number[];
   savesFailed: number;
   damageResults: DamageResult[];
   totalDamage: number;

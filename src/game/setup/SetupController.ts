@@ -86,9 +86,12 @@ export class SetupController {
       u.arrival = { method: u.reserve?.repositioned ? 'REPOSITION' : method === 'DEEP_STRIKE' ? 'DEEP_STRIKE' : 'STRATEGIC_RESERVES', turn: this.s.turn, ingressMethod: method };
       u.moveLock = { kind: 'UNTIL_NEXT_CHARGE', turn: this.s.turn };
       if (u.reserve) u.reserve.ingressCount++;
+      for (const passenger of this.s.units.filter(p => p.embarked?.transportId === u.id)) if (passenger.reserve) passenger.reserve.transportHasIngressed = true;
       setupEvent(this.s, u, 'ingress-completed', { method });
       if (method === 'DEEP_STRIKE') setupEvent(this.s, u, 'unit-deep-struck', { method });
     }
+    u.setupAtTurn = tx.kind === 'INGRESS_MOVE' ? this.s.turn : 0;
+    if (tx.kind === 'INGRESS_MOVE') u.lastMove = { kind: 'INGRESS_MOVE', turn: this.s.turn, phase: this.s.phase };
     this.s.setup = null; return { ok: true, value: undefined };
   }
   cancel(): CommandResult {

@@ -1,3 +1,4 @@
+import { modelHasWeapon } from '../attachments/queries';
 import { applyEffect } from '../effects/EffectEngine';
 import { battleStarted, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
@@ -233,7 +234,7 @@ export class CloseCombatController {
     const selected = this.combat.fight?.selected; if (!selected) return failure('NO_FIGHT_SELECTED');
     return this.beginTacticalMove('overrun', selected.unitId, targetIds);
   }
-  meleeAttack(weaponId: string, targetUnitId: string, rng: RandomSource, allocation?: DamageAllocationPolicy): CommandResult<WeaponResolution> {
+  meleeAttack(weaponId: string, targetUnitId: string, rng: RandomSource, allocation?: DamageAllocationPolicy, precisionModelId?: string): CommandResult<WeaponResolution> {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     const selected = this.combat.fight?.selected; if (!selected) return failure('NO_FIGHT_SELECTED');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
@@ -244,9 +245,9 @@ export class CloseCombatController {
     const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId);
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     if (weapon.kind !== 'melee') return failure('WEAPON_NOT_MELEE');
-    const models = getModelsEligibleToFight(this.state, unit, target).filter(m => !selected.usedModelIds.includes(m.id));
+    const models = getModelsEligibleToFight(this.state, unit, target).filter(m => !selected.usedModelIds.includes(m.id) && modelHasWeapon(this.state, unit, m, weaponId));
     if (!models.length) return failure('NO_ELIGIBLE_FIGHTERS');
-    const result = resolveCombat(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, allocation, [], this.state);
+    const result = resolveCombat(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, allocation, [], this.state, precisionModelId);
     this.state.units = this.state.units.map(u => u.id === target.id ? result.target : u);
     selected.usedModelIds.push(...models.map(m => m.id)); selected.hasRolled = true;
     this.emit(unit.id, { type: 'melee-attack-started', weaponId, targetUnitId });

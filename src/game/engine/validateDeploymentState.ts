@@ -11,9 +11,9 @@ export function validateDeploymentState(s: GameState): void {
   const abilityList = (abilities: readonly { kind: string; distance?: number }[] | undefined) => require(!abilities || abilities.every(a => ['SCOUTS', 'INFILTRATORS', 'DEEP_STRIKE'].includes(a.kind) && (a.kind !== 'SCOUTS' || (Number.isFinite(a.distance) && a.distance! >= 0))), 'abilities');
   for (const d of s.definitions) { require(d.points === undefined || (Number.isSafeInteger(d.points) && d.points >= 0), 'points'); abilityList(d.coreAbilities); }
   for (const u of s.units) {
-    require(u.location === undefined || ['BATTLEFIELD', 'STRATEGIC_RESERVES', 'RESERVES', 'DESTROYED'].includes(u.location), 'location');
+    require(u.location === undefined || ['BATTLEFIELD', 'STRATEGIC_RESERVES', 'RESERVES', 'DESTROYED', 'EMBARKED'].includes(u.location), 'location');
     require(u.location !== 'DESTROYED' || u.models.every(m => !m.alive), 'destroyed health');
-    require(!u.location || u.location === 'DESTROYED' || u.models.some(m => m.alive), 'living location');
+    require(!u.location || u.location === 'DESTROYED' || u.models.some(m => m.alive) || s.transportState?.disembark?.unitId === u.id || s.transportState?.destroyed.some(t => t.transportId === u.id), 'living location');
     u.models.forEach(m => abilityList(m.coreAbilities));
     if (u.reserve) require(typeof u.reserve.initial === 'boolean' && typeof u.reserve.repositioned === 'boolean' && !!u.reserve.reason && Number.isInteger(u.reserve.enteredTurn) && u.reserve.enteredTurn >= 1 && u.reserve.enteredTurn <= s.turn && Number.isInteger(u.reserve.ingressCount) && u.reserve.ingressCount >= 0, 'reserve record');
     if (u.arrival) require(Number.isInteger(u.arrival.turn) && u.arrival.turn >= 1 && u.arrival.turn <= s.turn && ['STRATEGIC_RESERVES', 'DEEP_STRIKE', 'REPOSITION'].includes(u.arrival.method) && ['STRATEGIC_EDGE', 'DEEP_STRIKE'].includes(u.arrival.ingressMethod), 'arrival');

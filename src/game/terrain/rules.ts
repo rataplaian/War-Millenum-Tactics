@@ -1,3 +1,4 @@
+import { modelKeywords } from '../attachments/queries';
 import { onBattlefield } from '../reserves/location';
 import type { GameState, Model, TerrainArea, TerrainRules, Unit } from '../models';
 import { baseIntersectsPolygon, elevation } from './geometry';
@@ -6,9 +7,7 @@ export const DEFAULT_TERRAIN_RULES: Readonly<TerrainRules> = Object.freeze({ det
 export const terrainRules = (s: GameState): TerrainRules => ({ ...DEFAULT_TERRAIN_RULES, ...s.battlefield.terrain?.rules });
 export const unitForModel = (s: GameState, m: Model): Unit => { const u = s.units.find(u => u.id === m.unitId); if (!u) throw new Error('Model unit missing'); return u; };
 export function keywordsFor(s: GameState, model: Model): string[] {
-  const definition = s.definitions.find(d => d.id === unitForModel(s, model).definitionId);
-  if (!definition) throw new Error('Model definition missing');
-  return definition.keywords.map(k => k.toUpperCase());
+  return modelKeywords(s, unitForModel(s, model), model);
 }
 export const hasAnyKeyword = (s: GameState, m: Model, allowed: readonly string[]) => keywordsFor(s, m).some(k => allowed.includes(k));
 export const LIGHT_BODY = ['INFANTRY', 'BEASTS', 'SWARM'] as const;

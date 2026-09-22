@@ -1,3 +1,5 @@
+import { isRecordedDeckWeapon, rangedLoadout } from '../transports/FiringDeck';
+import { historicalUnit } from '../attachments/queries';
 import { SETUP_EVENT_TYPES } from '../setup/types';
 import { onBattlefield } from '../reserves/location';
 import type { GameState } from '../models';
@@ -15,10 +17,10 @@ export function validateShootingState(state: GameState): void {
       b.position.y + b.height > state.battlefield.height)) throw new Error('Invalid LOS blocker');
   for (const [i, event] of state.events.entries()) {
     if (event.type === 'flow') {
-      if (event.sequence !== i + 1 || !state.players.some(p => p.id === event.playerId) || (event.unitId && !state.units.some(u => u.id === event.unitId)) || !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn || event.round !== Math.floor((event.turn - 1) / 2) + 1) throw new Error('Invalid flow event context');
+      if (event.sequence !== i + 1 || !state.players.some(p => p.id === event.playerId) || (event.unitId && !historicalUnit(state, event.unitId)) || !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn || event.round !== Math.floor((event.turn - 1) / 2) + 1) throw new Error('Invalid flow event context');
       continue;
     }
-    const source = state.units.find(u => u.id === event.unitId);
+    const source = historicalUnit(state, event.unitId);
     if (!EVENT_TYPES.includes(event.type) || event.sequence !== i + 1 || !source || event.playerId !== source.playerId ||
         !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn ||
         event.round !== Math.floor((event.turn - 1) / 2) + 1 ||
@@ -26,9 +28,9 @@ export function validateShootingState(state: GameState): void {
     if (event.type === 'weapon-fired' || event.type === 'model-damaged' || event.type === 'model-destroyed') {
       const weaponId = event.type === 'weapon-fired' ? event.resolution.weaponId : event.weaponId;
       const targetId = event.type === 'weapon-fired' ? event.resolution.targetUnitId : event.targetUnitId;
-      const target = state.units.find(u => u.id === targetId);
+      const target = historicalUnit(state, targetId);
       if (!target || target.playerId === source.playerId ||
-          !definitionFor(state, source).weapons.some(w => w.id === weaponId && w.kind === 'ranged')) throw new Error('Invalid shooting event references');
+          (!definitionFor(state, source).weapons.some(w => w.id === weaponId && w.kind === 'ranged') && !isRecordedDeckWeapon(state, source.id, weaponId))) throw new Error('Invalid shooting event references');
       if (event.type === 'model-destroyed' && !target.models.some(m => m.id === event.modelId)) throw new Error('Invalid casualty reference');
       if (event.type === 'model-damaged' && !target.models.some(m => m.id === event.damage.modelId)) throw new Error('Invalid damage reference');
       if (event.type === 'weapon-fired' && event.resolution.eligibleFiringModelIds.some(id => !source.models.some(m => m.id === id))) throw new Error('Invalid firing model reference');
@@ -40,8 +42,8 @@ export function validateShootingState(state: GameState): void {
   if (state.movement || state.phase !== 'Shooting' || state.status !== 'in-progress' || !source || !onBattlefield(source) ||
       source.playerId !== state.activePlayerId || source.state.hasShot || !source.models.some(m => m.alive) ||
       typeof transaction.hasRolled !== 'boolean') throw new Error('Invalid shooting transaction');
-  const weapons = definitionFor(state, source).weapons;
-  if (!weapons.some(w => w.kind === 'ranged') || new Set(transaction.firedWeaponIds).size !== transaction.firedWeaponIds.length ||
+  const weapons = rangedLoadout(state, source);
+  if ((!weapons.some(w => w.kind === 'ranged') && !definitionFor(state, source).transport?.firingDeck) || new Set(transaction.firedWeaponIds).size !== transaction.firedWeaponIds.length ||
       transaction.firedWeaponIds.some(id => !weapons.some(w => w.id === id && w.kind === 'ranged'))) throw new Error('Invalid fired weapon references');
   const start = state.events.reduce((last, e, i) => e.type === 'shooting-started' && e.unitId === source.id && e.turn === state.turn ? i : last, -1);
   if (start < 0) throw new Error('Missing shooting-started event');

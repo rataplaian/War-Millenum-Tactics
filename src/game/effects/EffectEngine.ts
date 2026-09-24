@@ -31,6 +31,7 @@ export function effectiveCharacteristic(s: GameState, unitId: string, characteri
   if (characteristic === 'SAVE') return Math.max(2, Math.min(7, n));
   if (characteristic === 'LEADERSHIP') return Math.max(4, Math.min(9, n));
   if (characteristic === 'HIT_ROLL' || characteristic === 'WOUND_ROLL') return Math.max(-1, Math.min(1, n));
+  if (characteristic === 'AP') return Math.min(0, n);
   return Math.max(0, n);
 }
 export function effectiveFlag(s: GameState, unitId: string, flag: string, fallback = false): boolean {

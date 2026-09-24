@@ -1,3 +1,7 @@
+import type { RerollPermission, DieResolution } from '../combat/dice';
+import type { MovementAbilityChoices } from '../abilities/movement';
+import type { WeaponAbilityDefinition, AttackChoices } from '../abilities/types';
+import type { AttackRecord, AttackJob } from '../combat/types';
 import type { AttachmentDefinition, AttachmentRecord } from '../attachments/types';
 import type { TransportCapacityDefinition, EmbarkedState, TransportState, FiringDeckSelection } from '../transports/types';
 import type { EffectPayload } from '../effects/types';
@@ -24,6 +28,8 @@ export type BaseGeometry = { kind: 'circle'; diameterMm: number };
 export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
+  oneShotExpended?: string[];
+  coreAbilityChoices?: Record<string, number>;
   abilities?: Ability[];
   toughness?: number;
   sourceDefinitionId?: string;
@@ -39,9 +45,11 @@ export interface Model {
   coreAbilities?: CoreAbility[];
   volume?: { kind: 'cylinder'; height: number };
 }
-export type DiceValue = { kind: 'fixed'; value: number } | { kind: 'dice'; count: number; sides: 6; modifier: number };
+export type DiceValue = { kind: 'fixed'; value: number } | { kind: 'dice'; count: number; sides: 3 | 6; modifier: number };
 export interface WeaponTrait { id: string; value?: number }
 interface WeaponProfile {
+  rerollPermissions?: RerollPermission[];
+  weaponAbilities?: WeaponAbilityDefinition[];
   id: string; name: string; attacks: DiceValue; skill: number; strength: number;
   /** Signed save modifier, e.g. -1. */
   armourPenetration: number; damage: DiceValue; traits: WeaponTrait[];
@@ -87,6 +95,7 @@ export interface CoherencyRule {
 }
 export interface SpatialRules { coherency: CoherencyRule; engagementDistance: number }
 export interface MovementTransaction {
+  abilityChoices?: MovementAbilityChoices;
   moveType?: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE';
   bonus?: number;
   irreversible?: boolean;
@@ -105,6 +114,9 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  combatRules?: { criticalHitThreshold: number; criticalWoundThreshold: number; loneOperativeDistance: number };
+  attackJob?: AttackJob;
+  destructionQueue?: { model: Model; unitId: string; resolved: boolean; waitForAttackerId?: string }[];
   attachments?: AttachmentRecord[];
   transportState?: TransportState;
   flow?: MatchFlowState;
@@ -130,7 +142,7 @@ export interface GameState {
   setup?: SetupTransaction | null;
   scout?: ScoutMoveTransaction | null;
 }
-export type FailureReason = 'INVALID_ATTACHMENT' | 'SUPPORT_REQUIRES_BODYGUARD' | 'NOT_TRANSPORT' | 'INVALID_PASSENGER' | 'TRANSPORT_CAPACITY' | 'TOO_FAR_FROM_TRANSPORT' | 'SET_UP_THIS_TURN' | 'NOT_EMBARKED' | 'DISEMBARK_NOT_ALLOWED' | 'DISEMBARK_IN_PROGRESS' | 'NO_DISEMBARK' | 'PLACEMENT_SEARCH_LIMIT' | 'TACTICAL_MOVE_REQUIRED' | 'FIRING_DECK_LIMIT' | 'ONE_SHOT_FORBIDDEN' | 'PRECISION_TARGET_INVALID' | 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
+export type FailureReason = 'ATTACK_PENDING' | 'NO_PENDING_ATTACK' | 'EXTRA_ATTACKS_PENDING' | 'INVALID_ABILITY_CHOICE' | 'INVALID_ATTACHMENT' | 'SUPPORT_REQUIRES_BODYGUARD' | 'NOT_TRANSPORT' | 'INVALID_PASSENGER' | 'TRANSPORT_CAPACITY' | 'TOO_FAR_FROM_TRANSPORT' | 'SET_UP_THIS_TURN' | 'NOT_EMBARKED' | 'DISEMBARK_NOT_ALLOWED' | 'DISEMBARK_IN_PROGRESS' | 'NO_DISEMBARK' | 'PLACEMENT_SEARCH_LIMIT' | 'TACTICAL_MOVE_REQUIRED' | 'FIRING_DECK_LIMIT' | 'ONE_SHOT_FORBIDDEN' | 'PRECISION_TARGET_INVALID' | 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
   'MODEL_NOT_IN_UNIT' | 'MODEL_DEAD' | 'INVALID_POSITION' | 'EXCEEDS_ALLOWANCE' |
   'OUTSIDE_BATTLEFIELD' | 'BASE_OVERLAP' | 'UNIT_ENGAGED' | 'ENEMY_ENGAGEMENT' | 'INCOHERENT' |
@@ -154,14 +166,18 @@ export type CommandResult<T = undefined> = { ok: true; value: T } | CommandFailu
 
 export type RangedWeapon = DeepReadonly<Extract<Weapon, { kind: 'ranged' }>>;
 export interface ShootingTransaction {
+  shootingMode?: 'NORMAL' | 'INDIRECT';
+  attackChoices?: Record<string, AttackChoices>;
+  hazardousCount?: number;
   firingDeck?: FiringDeckSelection[];
   unitId: string;
-  selectedTarget?: { weaponId: string; targetUnitId: string };
+  selectedTarget?: { weaponId: string; targetUnitId: string; modelCount?: number; distances?: Record<string, number> };
   firedWeaponIds: string[];
   hasRolled: boolean;
 }
-export interface DiceResolution { value: number; rolls: number[] }
-export interface SaveResult { required: number; roll: number | null; saved: boolean }
+export interface DiceResolution { value: number; rolls: number[]; dice?: DieResolution[] }
+export interface SaveResult {
+  selected?: 'ARMOUR' | 'INVULNERABLE'; die?: import('../combat/dice').DieResolution; required: number; roll: number | null; saved: boolean }
 export interface DamageResult {
   modelId: string;
   resolved: DiceResolution;
@@ -172,6 +188,8 @@ export interface DamageResult {
   destroyed: boolean;
 }
 export interface WeaponResolution {
+  attackRecords?: AttackRecord[];
+  pending?: boolean;
   weaponId: string;
   targetUnitId: string;
   eligibleFiringModelIds: string[];
@@ -215,7 +233,7 @@ export interface CombatMove extends MovementTransaction {
   allowance: number;
   used: Record<string, number>;
 }
-export interface ChargeAction { unitId: string; rolls: number[]; distance: number; targetIds: string[] }
+export interface ChargeAction { abilityChoices?: MovementAbilityChoices; unitId: string; rolls: number[]; distance: number; targetIds: string[] }
 export type FightStep = 'START' | 'PILE_IN' | 'FIGHT' | 'CONSOLIDATE' | 'END';
 export interface FightPhaseState {
   step: FightStep;
@@ -226,7 +244,7 @@ export interface FightPhaseState {
   engagedAtFightStart: string[];
   fought: string[];
   consolidateDone: string[];
-  selected: { unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
+  selected: { attackChoices?: Record<string, AttackChoices>; hazardousCount?: number; extraWeaponsUsed?: string[]; unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
 }
 export interface CloseCombatState {
   charge: ChargeAction | null;

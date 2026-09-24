@@ -1,3 +1,5 @@
+import { movementAbilities } from '../abilities/movement';
+import { unitHasCore } from '../abilities/registry';
 import { effectiveFlag } from '../effects/EffectEngine';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
@@ -13,7 +15,7 @@ export const living = (unit: Unit) => onBattlefield(unit) ? unit.models.filter(m
 export const enemies = (state: GameState, unit: Unit) => state.units.filter(u => u.playerId !== unit.playerId && living(u).length);
 export const unitDistance = (a: Unit, b: Unit) => Math.min(...living(a).flatMap(m => living(b).map(n => edgeDistance(m, n))));
 export const engagedTargets = (state: GameState, unit: Unit) => enemies(state, unit).filter(u => unitDistance(unit, u) <= state.spatialRules.engagementDistance + EPSILON);
-export const hasFightsFirst = (state: GameState, unit: Unit) => effectiveFlag(state, unit.id, 'FIGHTS_FIRST', state.closeCombat?.effects.some(e => e.unitId === unit.id && e.kind === 'FIGHTS_FIRST' && e.turn === state.turn) ?? false);
+export const hasFightsFirst = (state: GameState, unit: Unit) => effectiveFlag(state, unit.id, 'FIGHTS_FIRST', unitHasCore(state, unit, 'FIGHTS_FIRST') || (state.closeCombat?.effects.some(e => e.unitId === unit.id && e.kind === 'FIGHTS_FIRST' && e.turn === state.turn) ?? false));
 export interface ChargeExceptions { afterAdvance?: boolean; afterFallBack?: boolean; whileEngaged?: boolean }
 /** Generic extension point: future ability evaluation supplies permissions. */
 export function canDeclareCharge(state: GameState, unitId: string, exceptions: ChargeExceptions = {}): CommandResult<Unit> {
@@ -53,6 +55,7 @@ function intersections(a: Circle, b: Circle): Position[] {
  * No pixel sampling, path finding, terrain, or alternate geometry system. */
 export function reachablePositions(state: GameState, unit: Unit, model: Model, origin: Position, allowance: number, targetModels: Model[], maxEdge: number): Position[] {
   const radius = baseRadius(model.base);
+  allowance = Math.max(0, allowance - movementAbilities(state, model).penalty);
   const circles: Circle[] = [{ position: origin, radius: allowance },
     ...targetModels.map(m => ({ position: m.position, radius: radius + baseRadius(m.base) + maxEdge })),
     ...state.units.flatMap(u => living(u)).filter(m => m.id !== model.id).map(m => ({ position: m.position, radius: radius + baseRadius(m.base) }))];

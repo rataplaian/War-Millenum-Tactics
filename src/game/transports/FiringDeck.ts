@@ -1,3 +1,4 @@
+import { hasWeaponAbility } from '../abilities/registry';
 import type { CommandResult, GameState, RangedWeapon, Unit } from '../models';
 import { capacityDefinition, passengers } from './capacity';
 import { modelDefinition } from '../attachments/queries';
@@ -8,7 +9,7 @@ export function rangedLoadout(s: GameState, u: Unit): readonly RangedWeapon[] {
   return [...normal, ...(s.shooting?.unitId === u.id ? s.shooting.firingDeck?.map(x => x.borrowed) ?? [] : [])];
 }
 export function firingDeckOptions(s: GameState, transportId: string) {
-  return passengers(s, transportId).filter(u => u.selectedToShootAt?.turn !== s.turn && !u.state.hasShot && (u.cannotShootUntilTurn ?? 0) < s.turn).flatMap(u => u.models.filter(m => m.alive).flatMap(m => modelDefinition(s, u, m).weapons.filter(w => w.kind === 'ranged' && !w.traits.some(t => t.id.toUpperCase().replaceAll('_', ' ') === 'ONE SHOT')).map(w => ({ passengerUnitId: u.id, modelId: m.id, weaponId: w.id }))));
+  return passengers(s, transportId).filter(u => u.selectedToShootAt?.turn !== s.turn && !u.state.hasShot && (u.cannotShootUntilTurn ?? 0) < s.turn).flatMap(u => u.models.filter(m => m.alive).flatMap(m => modelDefinition(s, u, m).weapons.filter(w => w.kind === 'ranged' && !hasWeaponAbility(w, 'ONE_SHOT')).map(w => ({ passengerUnitId: u.id, modelId: m.id, weaponId: w.id }))));
 }
 export function selectFiringDeck(s: GameState, unitId: string, selections: { modelId: string; weaponId: string }[]): CommandResult {
   const t = s.units.find(u => u.id === unitId)!;

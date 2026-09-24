@@ -1,3 +1,6 @@
+import { movementAbilities } from '../abilities/movement';
+import { centreDistance } from '../utils/geometry';
+import { validateAttackState } from '../combat/validateAttackState';
 import { historicalUnit, modelDefinition } from '../attachments/queries';
 import { validateTransportState } from '../transports/validateTransportState';
 import { validateFlowState } from '../flow/validateFlowState';
@@ -69,7 +72,7 @@ export function validateState(state: GameState): void {
       const model = unit.models.find(m => m.id === original.modelId);
       if (!model || !isFinitePosition(original.position) || !nonNegative(original.movementUsed) ||
           original.movementUsed > model.movementUsed + EPSILON ||
-          distanceTravelled(original.position, model.position) > model.movementUsed - original.movementUsed + EPSILON ||
+          (movementAbilities(state, model).flying ? centreDistance(original.position, model.position) : distanceTravelled(original.position, model.position)) > model.movementUsed - original.movementUsed + EPSILON ||
           (onBattlefield(unit) && model.alive && !baseInsideBattlefield({ ...model, position: original.position }, state.battlefield))) throw new Error('Invalid movement original');
     }
     // Cancel must also produce a collision-free state, including against other units.
@@ -77,6 +80,7 @@ export function validateState(state: GameState): void {
     if (restored.some((a, i) => restored.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping movement originals');
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !historicalUnit(state, event.unitId)))) throw new Error('Invalid event sequence');
+  validateAttackState(state);
   validateTransportState(state);
   validateFlowState(state);
   validateShootingState(state);

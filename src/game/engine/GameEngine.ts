@@ -1,3 +1,13 @@
+import { validateMovementAbilities, type MovementAbilityChoices } from '../abilities/movement';
+import { validAttackChoices } from '../abilities/validation';
+import { edgeDistance } from '../utils/geometry';
+import { abilitiesFor } from '../deployment/abilities';
+import { pendingCoreChoices } from '../abilities/core';
+import { queueDestructions, releaseDestructions, resolveDestructions } from '../combat/destruction';
+import { hasWeaponAbility, resolvedAbilities, weaponInstanceId } from '../abilities/registry';
+import type { AttackChoices } from '../abilities/types';
+import type { AttackJob } from '../combat/types';
+import { createAttackJob, runAttackJob, type RollWindow } from '../combat/AttackPipeline';
 import { formAttachments, processAttachmentCasualties, finishAttacker } from '../attachments/AttachmentController';
 import type { AttachmentAssignment, AttachmentPolicy } from '../attachments/types';
 import { attachmentFor, historicalUnit, modelDefinition, modelHasWeapon, modelKeywords, unitKeywords, sourceAbilities, attackToughness } from '../attachments/queries';
@@ -43,7 +53,6 @@ import { availableRangedWeapons, validateShooter, legalShootingTargets, shooting
 import { definitionFor } from '../rules/movement';
 import { type VisibilityPolicy } from '../rules/visibility';
 import { allocateDamage, type DamageAllocationPolicy } from '../rules/damageAllocation';
-import { resolveShooting } from '../rules/resolveShooting';
 import type { RandomSource } from '../utils/dice';
 export interface EnginePolicies { flow?: FlowPolicies; stratagems?: StratagemPolicies; setup?: SetupPolicy; reserves?: ReservePolicy; visibility?: VisibilityPolicy; visibilityProvider?: VisibilityProviderFactory; detectionRange?: DetectionRangePolicy; damageAllocation?: DamageAllocationPolicy; chargeExceptions?: (state: GameState, unitId: string) => ChargeExceptions }
 
@@ -99,22 +108,32 @@ export class GameEngine {
   }
   private event(unitId: string, payload: EventPayload): void {
     this.state.events.push(copy({ ...payload, sequence: this.state.events.length + 1,
-      round: this.state.round, turn: this.state.turn, playerId: this.state.activePlayerId, unitId } as GameEvent));
+      round: this.state.round, turn: this.state.turn, playerId: historicalUnit(this.state, unitId)?.playerId ?? this.state.activePlayerId, unitId } as GameEvent));
   }
-  beginMovement(unitId: string, moveType: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' = 'NORMAL_MOVE', rng?: RandomSource): CommandResult {
+  beginMovement(unitId: string, moveType: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' = 'NORMAL_MOVE', rng?: RandomSource, abilityChoices: MovementAbilityChoices = {}): CommandResult {
     const result = validateBeginMovement(this.state, unitId, moveType);
     if (!result.ok) return result;
+    if (!validateMovementAbilities(this.state, result.value, abilityChoices)) return failure('INVALID_ABILITY_CHOICE');
     if (moveType !== 'NORMAL_MOVE') {
       const draft = this.getState(), unit = draft.units.find(u => u.id === unitId)!;
       if (!rng && (moveType === 'ADVANCE_MOVE' || !fallBackOptions(draft, unit).orderedRetreat)) return failure('INVALID_CONFIGURATION');
       const bonus = moveType === 'ADVANCE_MOVE' ? rollD6(rng!) : 0;
       const desperate = moveType === 'FALL_BACK_MOVE' && !fallBackOptions(draft, unit).orderedRetreat;
-      if (desperate) { const hazard = resolveHazardRolls(draft, unit, unit.models.filter(m => m.alive).length, rng!); flowEvent(draft, 'HAZARD_ROLLED', { rolls: hazard.rolls, mortalWounds: hazard.mortalWounds }, unitId); }
-      draft.movement = { unitId, moveType, bonus, desperate, irreversible: moveType === 'ADVANCE_MOVE' || desperate, originals: unit.models.map(m => ({ modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
+      if (desperate) {
+        const hazard = resolveHazardRolls(draft, unit, unit.models.filter(m => m.alive).length, rng!);
+        flowEvent(draft, 'HAZARD_ROLLED', { rolls: hazard.rolls, mortalWounds: hazard.mortalWounds }, unitId);
+        queueDestructions(this.state, draft); detectDestroyedTransports(draft); resolveDestructions(draft, rng!);
+        if (!unit.models.some(m => m.alive)) {
+          unit.state.hasMoved = true; processAttachmentCasualties(draft); normalizeDestroyed(draft);
+          this.state = draft; this.event(unitId, { type: 'movement-started' }); this.event(unitId, { type: 'movement-completed' });
+          return { ok: true, value: undefined };
+        }
+      }
+      draft.movement = { unitId, abilityChoices: copy(abilityChoices), moveType, bonus, desperate, irreversible: moveType === 'ADVANCE_MOVE' || desperate, originals: unit.models.map(m => ({ modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
       if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus }, unitId); }
       this.state = draft; this.event(unitId, { type: 'movement-started' }); return { ok: true, value: undefined };
     }
-    this.state.movement = { unitId, originals: result.value.models.map(m => ({
+    this.state.movement = { unitId, abilityChoices: copy(abilityChoices), originals: result.value.models.map(m => ({
       modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
     this.event(unitId, { type: 'movement-started' });
     return { ok: true, value: undefined };
@@ -153,7 +172,7 @@ export class GameEngine {
     recordTerrainChanges(before, this.state);
     return { ok: true, value: undefined };
   }
-  completeMovement(embarkTransportId?: string): CommandResult {
+  completeMovement(embarkTransportId?: string, rng?: RandomSource): CommandResult {
     const error = movementPhaseError(this.state);
     if (error) return error;
     if (!this.state.movement) return failure('NO_ACTIVE_MOVEMENT');
@@ -165,25 +184,28 @@ export class GameEngine {
     const coherency = checkCoherency(unit.models, this.state.spatialRules.coherency);
     if (!coherency.coherent) return { ...failure('INCOHERENT'), modelIds: coherency.failingModelIds.length ?
       coherency.failingModelIds : unit.models.filter(m => m.alive).map(m => m.id) };
-    const before = this.getState();
+    if (this.state.movement.abilityChoices?.mobile && !rng) return failure('INVALID_CONFIGURATION');
+    const before = this.getState(), draft = this.getState();
     if (embarkTransportId) {
-      const draft = this.getState(); const result = embark(draft, unit.id, embarkTransportId);
+      const result = embark(draft, unit.id, embarkTransportId);
       if (!result.ok) return result;
-      this.state = draft;
     }
-    const moved = this.state.units.find(u => u.id === unit.id)!, moveType = this.state.movement!.moveType ?? 'NORMAL_MOVE';
+    const moved = draft.units.find(u => u.id === unit.id)!, moveType = draft.movement!.moveType ?? 'NORMAL_MOVE';
     moved.state.hasMoved = true;
-    moved.lastMove = { kind: moveType, turn: this.state.turn, phase: this.state.phase };
+    moved.lastMove = { kind: moveType, turn: draft.turn, phase: draft.phase };
     if (moveType === 'ADVANCE_MOVE') moved.state.hasAdvanced = true;
-    if (moveType === 'FALL_BACK_MOVE') { moved.state.hasFallenBack = true; moved.cannotShootUntilTurn = this.state.turn; }
-    if (moveType !== 'NORMAL_MOVE') moved.cannotChargeUntilTurn = this.state.turn;
-    if (this.state.transportState?.tacticalFollowUp === unit.id) delete this.state.transportState.tacticalFollowUp;
-    this.state.movement = null;
-    this.event(unit.id, { type: 'movement-completed' });
-    processAttachmentCasualties(this.state); normalizeDestroyed(this.state); recordTerrainChanges(before, this.state);
+    if (moveType === 'FALL_BACK_MOVE') { moved.state.hasFallenBack = true; moved.cannotShootUntilTurn = draft.turn; }
+    if (moveType !== 'NORMAL_MOVE') moved.cannotChargeUntilTurn = draft.turn;
+    if (draft.transportState?.tacticalFollowUp === unit.id) delete draft.transportState.tacticalFollowUp;
+    if (draft.movement!.abilityChoices?.mobile) { const roll = rollD6(rng!); if (roll === 1) moved.state.battleShocked = true; flowEvent(draft, 'SUPER_HEAVY_WALKER_TEST', { roll }, moved.id); }
+    draft.movement = null;
+    draft.events.push({ type: 'movement-completed', unitId: unit.id, playerId: unit.playerId, turn: draft.turn, round: draft.round, sequence: draft.events.length + 1 });
+    processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
+    this.state = draft;
     return { ok: true, value: undefined };
   }
   beginShooting(unitId: string, deck: { modelId: string; weaponId: string }[] = []): CommandResult {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
     const error = shootingPhaseError(this.state);
     if (error) return error;
     if (this.state.shooting) return failure('SHOOTING_IN_PROGRESS');
@@ -202,19 +224,98 @@ export class GameEngine {
   getLegalTargets(unitId: string, weaponId: string) {
     return copy(legalShootingTargets(this.state, unitId, weaponId, this.visibility()));
   }
+  setAttackChoices(weaponId: string, choices: AttackChoices): CommandResult {
+    const block = temporalBlock(this.state); if (block) return block;
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
+    const tx = this.state.shooting ?? this.state.closeCombat?.fight?.selected;
+    if (!tx) return failure('UNIT_NOT_ELIGIBLE');
+    if (this.state.shooting?.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
+    const unit = this.state.units.find(u => u.id === tx.unitId)!;
+    const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId) ?? this.state.shooting?.firingDeck?.find(x => x.borrowed.id === weaponId)?.borrowed;
+    if (!weapon) return failure('WEAPON_NOT_FOUND');
+    const draft = copy(choices);
+    if (!validAttackChoices(weapon, draft)) return failure('INVALID_ABILITY_CHOICE');
+    if (draft.shootingMode === 'INDIRECT' && !hasWeaponAbility(weapon, 'INDIRECT_FIRE')) return failure('INVALID_ABILITY_CHOICE');
+    try { resolvedAbilities(this.state, unit, weapon, draft); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
+    if (this.state.shooting && draft.shootingMode) {
+      if (this.state.shooting.firedWeaponIds.length && (this.state.shooting.shootingMode ?? 'NORMAL') !== draft.shootingMode) return failure('IRREVERSIBLE_ACTION');
+      if (draft.shootingMode === 'INDIRECT' && (unit.state.hasAdvanced || isUnitEngaged(this.state, unit))) return failure('UNIT_NOT_ELIGIBLE');
+      this.state.shooting.shootingMode = draft.shootingMode;
+    }
+    tx.attackChoices ??= {}; tx.attackChoices[weaponId] = draft;
+    return { ok: true, value: undefined };
+  }
+  private rollWindow(state: GameState): RollWindow {
+    return (trigger, job) => {
+      state.units = state.units.map(u => u.id === job.target.id ? job.target : u);
+      flowEvent(state, trigger, { weaponId: job.weapon.id, modelId: job.current!.modelId, roll: (trigger === 'AFTER_HIT_ROLL' ? job.current!.hit : job.current!.wound)!.value }, job.attackerUnitId);
+      if (!state.flow) return false;
+      const probe = copy(state);
+      openWindow(probe, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
+      if (!probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
+      openWindow(state, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
+      return true;
+    };
+  }
+  resumeAttack(rng: RandomSource): CommandResult<WeaponResolution> {
+    const block = temporalBlock(this.state); if (block) return block;
+    if (!this.state.attackJob) return failure('NO_PENDING_ATTACK');
+    const before = this.getState(), draft = this.getState(), job = draft.attackJob!;
+    job.target = copy(draft.units.find(u => u.id === job.target.id)!);
+    const complete = runAttackJob(job, rng, draft, this.rollWindow(draft), this.policies.damageAllocation ?? allocateDamage);
+    draft.units = draft.units.map(u => u.id === job.target.id ? job.target : u);
+    queueDestructions(before, draft, job.attackerUnitId);
+    this.state = draft;
+    if (complete) this.commitAttack(job, before);
+    return { ok: true, value: copy(job.resolution) };
+  }
+  getPendingCoreChoices() { return pendingCoreChoices(this.getState()); }
+  chooseCoreAbility(modelId: string, kind: string, instance: number): CommandResult {
+    if (actionBusy(this.state) || this.state.flow?.window) return failure('COMBAT_IN_PROGRESS');
+    const u = this.state.units.find(u => u.models.some(m => m.id === modelId)), m = u?.models.find(m => m.id === modelId);
+    if (!u || !m || !Number.isSafeInteger(instance) || instance < 0 || !abilitiesFor(this.state, u, m).filter(a => a.kind === kind)[instance]) return failure('INVALID_ABILITY_CHOICE');
+    m.coreAbilityChoices ??= {}; m.coreAbilityChoices[kind] = instance;
+    return { ok: true, value: undefined };
+  }
+  resolveDestructionEffects(rng: RandomSource): CommandResult {
+    const block = temporalBlock(this.state); if (block) return block;
+    if (this.state.attackJob || this.state.transportState?.destroyed.length || this.state.transportState?.disembark) return failure('PENDING_RESOLUTION');
+    const before = this.getState(), draft = this.getState();
+    resolveDestructions(draft, rng); recordTerrainChanges(before, draft); this.state = draft;
+    return { ok: true, value: undefined };
+  }
+  private commitAttack(job: AttackJob, before: GameState) {
+    delete this.state.attackJob;
+    const { weapon, resolution, attackerUnitId } = job;
+    if (weapon.kind === 'ranged') {
+      const tx = this.state.shooting!;
+      delete tx.selectedTarget; tx.firedWeaponIds.push(weapon.id);
+      tx.hasRolled ||= resolution.hitRolls.length > 0 || resolution.woundRolls.length > 0 || resolution.attackCounts.some(c => c.resolved.rolls.length > 0);
+      this.event(attackerUnitId, { type: 'weapon-fired', resolution });
+      for (const m of resolution.attackModifiers ?? []) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(attackerUnitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId: job.target.id, effectiveSkill: m.effectiveSkill });
+      for (const damage of resolution.damageResults) this.event(attackerUnitId, { type: 'model-damaged', targetUnitId: job.target.id, weaponId: weapon.id, damage });
+      for (const modelId of resolution.destroyedModelIds) this.event(attackerUnitId, { type: 'model-destroyed', targetUnitId: job.target.id, weaponId: weapon.id, modelId });
+    } else this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution });
+    queueDestructions(before, this.state, attackerUnitId);
+    processAttachmentCasualties(this.state, attackerUnitId);
+    detectDestroyedTransports(this.state); normalizeDestroyed(this.state); recordTerrainChanges(before, this.state);
+  }
   selectShootingTarget(weaponId: string, targetUnitId: string): CommandResult {
     return this.flowCommand(s => {
       const block = temporalBlock(s); if (block) return block;
+      if (s.attackJob) return failure('ATTACK_PENDING');
       if (!s.shooting) return failure('NO_ACTIVE_SHOOTING');
       if (s.shooting.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
       const legal = validateShootingTarget(s, s.shooting.unitId, weaponId, targetUnitId, this.visibility());
       if (!legal.ok) return legal;
-      s.shooting.selectedTarget = { weaponId, targetUnitId };
+      const target = s.units.find(u => u.id === targetUnitId)!;
+      s.shooting.selectedTarget = { weaponId, targetUnitId, modelCount: target.models.filter(m => m.alive).length, distances: Object.fromEntries(s.units.find(u => u.id === s.shooting!.unitId)!.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => [m.id, Math.min(...target.models.filter(m => m.alive).map(t => edgeDistance(m, t)))])) };
       openWindow(s, 'AFTER_TARGET_SELECTED', { unitId: s.shooting.unitId, targetUnitId });
       return { ok: true, value: undefined };
     });
   }
   fireWeapon(weaponId: string, targetUnitId: string, rng: RandomSource, precisionModelId?: string): CommandResult<WeaponResolution> {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
     const error = shootingPhaseError(this.state);
     if (error) return error;
     const transaction = this.state.shooting;
@@ -228,60 +329,71 @@ export class GameEngine {
     if (!weapon.ok) return weapon;
     const target = this.state.units.find(u => u.id === targetUnitId)!;
     if (precisionModelId && !this.precisionTargets(transaction.unitId, weaponId, targetUnitId).includes(precisionModelId)) return failure('PRECISION_TARGET_INVALID');
-    // Resolve against detached data. Rule rejections above consume no RNG; a broken RNG/policy
-    // throws without partially changing battle state. External RNG state cannot be rolled back.
-    const before = this.getState();
-    const shooter = this.state.units.find(u => u.id === transaction.unitId)!;
-    const modifiers = shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => shootingModifiers(this.state, m, target, weapon.value.skill, provider));
-    const outcome = resolveShooting(weapon.value, legal.value.eligibleFiringModelIds, copy(target),
-      definitionFor(this.state, target), rng, this.policies.damageAllocation ?? allocateDamage, modifiers, this.state, precisionModelId);
-    this.state.units = this.state.units.map(u => u.id === target.id ? outcome.target : u);
-    if (outcome.resolution.attacks > 0) shooter.lastRangedAttackTurnIndex = this.state.turn;
-    delete transaction.selectedTarget;
-    transaction.firedWeaponIds.push(weaponId);
-    transaction.hasRolled ||= outcome.resolution.hitRolls.length > 0 ||
-      outcome.resolution.attackCounts.some(count => count.resolved.rolls.length > 0);
-    this.event(transaction.unitId, { type: 'weapon-fired', resolution: outcome.resolution });
-    for (const m of modifiers) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(transaction.unitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId, effectiveSkill: m.effectiveSkill });
-    recordTerrainChanges(before, this.state);
-    processAttachmentCasualties(this.state, transaction.unitId);
-    detectDestroyedTransports(this.state);
-    normalizeDestroyed(this.state);
-    for (const damage of outcome.resolution.damageResults) {
-      this.event(transaction.unitId, { type: 'model-damaged', targetUnitId, weaponId, damage });
-      if (damage.destroyed) this.event(transaction.unitId, { type: 'model-destroyed', targetUnitId, weaponId, modelId: damage.modelId });
+    const choices = { ...transaction.attackChoices?.[weaponId], ...(hasWeaponAbility(weapon.value, 'INDIRECT_FIRE') ? { shootingMode: transaction.shootingMode ?? 'NORMAL' as const } : {}) };
+    try { resolvedAbilities(this.state, target, weapon.value, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
+    const before = this.getState(), draft = this.getState();
+    const shooter = draft.units.find(u => u.id === transaction.unitId)!;
+    const modifiers = shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => shootingModifiers(draft, m, target, weapon.value.skill, provider, weapon.value, choices));
+    const job = createAttackJob(weapon.value, legal.value.eligibleFiringModelIds, copy(target), definitionFor(draft, target), rng, modifiers, draft, precisionModelId, choices, provider);
+    // Reserve selection before the first irreversible roll; One Shot is per original bearer/weapon.
+    for (const model of shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id))) {
+      if (job.contexts.find(c => c.attackerModelId === model.id)!.abilities.some(a => a.type === 'ONE_SHOT')) { model.oneShotExpended ??= []; model.oneShotExpended.push(weaponInstanceId(draft, shooter, model, weapon.value)); }
     }
-    return { ok: true, value: copy(outcome.resolution) };
+    if (job.contexts.some(c => c.abilities.some(a => a.type === 'HAZARDOUS'))) draft.shooting!.hazardousCount = (draft.shooting!.hazardousCount ?? 0) + job.contexts.filter(c => c.abilities.some(a => a.type === 'HAZARDOUS')).length;
+    if (job.resolution.attacks > 0) shooter.lastRangedAttackTurnIndex = draft.turn;
+    const complete = runAttackJob(job, rng, draft, this.rollWindow(draft), this.policies.damageAllocation ?? allocateDamage);
+    draft.units = draft.units.map(u => u.id === target.id ? job.target : u);
+    if (!complete) { draft.attackJob = job; draft.shooting!.hasRolled = true; }
+    queueDestructions(before, draft, job.attackerUnitId);
+    this.state = draft;
+    if (complete) this.commitAttack(job, before);
+    return { ok: true, value: copy(job.resolution) };
   }
+
   cancelShooting(): CommandResult {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
     const error = shootingPhaseError(this.state);
     if (error) return error;
     if (!this.state.shooting) return failure('NO_ACTIVE_SHOOTING');
-    if (this.state.shooting.hasRolled || this.state.shooting.selectedTarget) return failure('SHOOTING_ALREADY_RESOLVED');
+    if (this.state.shooting.hasRolled || this.state.shooting.selectedTarget || this.state.shooting.hazardousCount || this.state.shooting.firedWeaponIds.some(id => { const w = definitionFor(this.state, this.state.units.find(u => u.id === this.state.shooting!.unitId)!).weapons.find(w => w.id === id); return w && hasWeaponAbility(w, 'ONE_SHOT'); })) return failure('SHOOTING_ALREADY_RESOLVED');
     const { unitId } = this.state.shooting;
     this.state.shooting = null;
     this.event(unitId, { type: 'shooting-cancelled' });
     return { ok: true, value: undefined };
   }
-  completeShooting(): CommandResult {
+  completeShooting(rng?: RandomSource): CommandResult {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
     const error = shootingPhaseError(this.state);
     if (error) return error;
     if (!this.state.shooting) return failure('NO_ACTIVE_SHOOTING');
     const { unitId } = this.state.shooting;
     if (this.state.shooting.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
-    this.state.units.find(u => u.id === unitId)!.state.hasShot = true;
-    this.state.shooting = null;
-    this.event(unitId, { type: 'shooting-completed' });
-    finishAttacker(this.state, unitId);
-    openWindow(this.state, 'AFTER_UNIT_SHOT', { unitId });
+    const count = this.state.shooting.hazardousCount ?? 0;
+    if ((count || this.state.destructionQueue?.some(q => !q.resolved)) && !rng) return failure('INVALID_CONFIGURATION');
+    const before = this.getState(), draft = this.getState();
+    if (count) {
+      const unit = draft.units.find(u => u.id === unitId)!;
+      const hazard = resolveHazardRolls(draft, unit, count, rng!);
+      flowEvent(draft, 'HAZARD_ROLLED', { rolls: hazard.rolls, mortalWounds: hazard.mortalWounds }, unitId);
+    }
+    draft.units.find(u => u.id === unitId)!.state.hasShot = true;
+    draft.shooting = null;
+    draft.events.push({ type: 'shooting-completed', unitId, sequence: draft.events.length + 1, round: draft.round, turn: draft.turn, playerId: draft.activePlayerId });
+    queueDestructions(before, draft, unitId);
+    finishAttacker(draft, unitId); releaseDestructions(draft, unitId);
+    detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
+    processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
+    openWindow(draft, 'AFTER_UNIT_SHOT', { unitId }); this.state = draft;
     return { ok: true, value: undefined };
   }
 
   private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
     const draft = this.getState();
     const block = temporalBlock(draft); if (block) return block;
     const result = command(new CloseCombatController(draft));
     if (result.ok) {
+      queueDestructions(this.state, draft, draft.closeCombat?.fight?.selected?.unitId);
       for (const event of draft.events.slice(this.state.events.length)) {
         if (event.type === 'combat-move-completed' && event.kind === 'charge') openWindow(draft, 'AFTER_CHARGE_MOVE', { unitId: event.unitId });
         if (event.type === 'fight-unit-completed') { finishAttacker(draft, event.unitId); }
@@ -291,8 +403,8 @@ export class GameEngine {
       detectDestroyedTransports(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
     return copy(result);
   }
-  declareCharge(unitId: string, rng: RandomSource) {
-    return this.combatCommand(c => c.declareCharge(unitId, rng, this.policies.chargeExceptions?.(this.getState(), unitId)));
+  declareCharge(unitId: string, rng: RandomSource, choices: MovementAbilityChoices = {}) {
+    return this.combatCommand(c => c.declareCharge(unitId, rng, this.policies.chargeExceptions?.(this.getState(), unitId), choices));
   }
   getLegalChargeTargets() {
     const charge = this.state.closeCombat?.charge;
@@ -315,10 +427,23 @@ export class GameEngine {
   meleeAttack(weaponId: string, targetId: string, rng: RandomSource, precisionModelId?: string) {
     const id = this.state.closeCombat?.fight?.selected?.unitId;
     if (precisionModelId && (!id || !this.precisionTargets(id, weaponId, targetId).includes(precisionModelId))) return failure('PRECISION_TARGET_INVALID');
-    return this.combatCommand(c => c.meleeAttack(weaponId, targetId, rng, this.policies.damageAllocation, precisionModelId));
+    return this.combatCommand(c => c.meleeAttack(weaponId, targetId, rng, this.policies.damageAllocation, precisionModelId, this.rollWindowForCombat()));
   }
+  private rollWindowForCombat() { return (s: GameState, trigger: Parameters<RollWindow>[0], job: AttackJob) => this.rollWindow(s)(trigger, job); }
   cancelFightUnit() { return this.combatCommand(c => c.cancelFightUnit()); }
-  completeFightUnit() { return this.combatCommand(c => c.completeFightUnit()); }
+  completeFightUnit(rng?: RandomSource): CommandResult {
+    if (this.state.attackJob) return failure('ATTACK_PENDING');
+    const draft = this.getState(), block = temporalBlock(draft); if (block) return block;
+    const selected = draft.closeCombat?.fight?.selected, count = selected?.hazardousCount ?? 0;
+    if ((count || draft.destructionQueue?.some(q => !q.resolved)) && !rng) return failure('INVALID_CONFIGURATION');
+    const result = new CloseCombatController(draft).completeFightUnit(); if (!result.ok) return result;
+    const id = selected!.unitId;
+    if (count) { const hazard = resolveHazardRolls(draft, draft.units.find(u => u.id === id)!, count, rng!); flowEvent(draft, 'HAZARD_ROLLED', { rolls: hazard.rolls, mortalWounds: hazard.mortalWounds }, id); }
+    queueDestructions(this.state, draft, id); finishAttacker(draft, id); releaseDestructions(draft, id);
+    detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
+    processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft);
+    openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: id }); this.state = draft; return result;
+  }
 
   private visibility() {
     const snapshot = this.getState();
@@ -333,7 +458,7 @@ export class GameEngine {
     return copy({ models: snapshot.units.filter(onBattlefield).flatMap(u => u.models).filter(m => m.alive).map(m => ({ modelId: m.id, elevation: elevation(m.position), areaIds: areasForModel(snapshot, m).map(a => a.id), hidden: isModelHidden(snapshot, m), detectionRange: (this.policies.detectionRange ?? getDetectionRange)(m, snapshot) })),
       target: observer && target ? { visible: provider.isUnitVisible(observer, target), fullyVisible: provider.isUnitFullyVisible(observer, target),
         models: target.models.filter(m => m.alive).map(m => ({ modelId: m.id, ...provider.inspect(observer, m) })),
-        attack: weapon ? shootingModifiers(snapshot, observer, target, weapon.skill, provider) : null } : null });
+        attack: weapon?.kind === 'ranged' ? (() => { try { return shootingModifiers(snapshot, observer, target, weapon.skill, provider, weapon, snapshot.shooting?.attackChoices?.[weapon.id]); } catch { return null; } })() : null } : null });
   }
 
   private setupCommand<T>(command: (draft: GameState) => CommandResult<T>): CommandResult<T> {
@@ -376,10 +501,11 @@ export class GameEngine {
   }
 
   private passengerCommand<T>(action: (s: GameState) => CommandResult<T>): CommandResult<T> {
+    if (this.state.attackJob || ((this.state.shooting || this.state.closeCombat?.fight?.selected) && this.state.transportState?.destroyed.length)) return failure('ATTACK_PENDING');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     const block = temporalBlock(this.state); if (block && !this.state.transportState?.destroyed.length) return block;
     const draft = this.getState(), result = action(draft);
-    if (result.ok) { if (!draft.transportState?.disembark) processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) { queueDestructions(this.state, draft); if (!draft.transportState?.disembark) processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
     return copy(result);
   }
   configureAttachments(assignments: AttachmentAssignment[], policy?: AttachmentPolicy) { return this.passengerCommand(s => formAttachments(s, assignments, policy)); }
@@ -396,7 +522,7 @@ export class GameEngine {
     const s = this.getState(), shooter = s.units.find(u => u.id === shooterId), target = s.units.find(u => u.id === targetId);
     if (!shooter || !target || !attachmentFor(s, targetId)) return [];
     const weapon = definitionFor(s, shooter).weapons.find(w => w.id === weaponId) ?? s.shooting?.firingDeck?.find(x => x.borrowed.id === weaponId)?.borrowed;
-    if (!weapon?.traits.some(t => t.id.toUpperCase() === 'PRECISION')) return [];
+    if (!weapon || !hasWeaponAbility(weapon, 'PRECISION')) return [];
     const provider = this.visibility();
     const ranged = weapon.kind === 'ranged' ? validateShootingTarget(s, shooterId, weaponId, targetId, provider) : null;
     const eligible = weapon.kind === 'ranged' ? ranged?.ok ? shooter.models.filter(m => ranged.value.eligibleFiringModelIds.includes(m.id)) : [] : getModelsEligibleToFight(s, shooter, target).filter(m => modelHasWeapon(s, shooter, m, weaponId) && !s.closeCombat?.fight?.selected?.usedModelIds.includes(m.id));
@@ -411,7 +537,7 @@ export class GameEngine {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (!this.state.flow) return failure('FLOW_REQUIRED');
     const draft = this.getState(), result = command(draft);
-    if (result.ok) { validateState(draft); this.state = draft; }
+    if (result.ok) { queueDestructions(this.state, draft, draft.attackJob?.attackerUnitId); if (draft.attackJob) draft.attackJob.target = copy(draft.units.find(u => u.id === draft.attackJob!.target.id)!); validateState(draft); this.state = draft; }
     return copy(result);
   }
   /** Explicit migration: legacy snapshots keep their original phase progression until enabled. */

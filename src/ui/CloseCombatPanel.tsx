@@ -57,7 +57,7 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
         </View>)}
         <Button title="OVERRUN PILE IN" onPress={() => run(engine.beginOverrun(targets))} />
         <Button title="CANCEL FIGHT SELECTION" disabled={!!fight?.selected?.hasRolled || !!fight?.selected?.overrunDone} onPress={() => run(engine.cancelFightUnit())} />
-        <Button title="COMPLETE FIGHT UNIT" onPress={() => run(engine.completeFightUnit())} />
+        <Button title="COMPLETE FIGHT UNIT" onPress={() => run(engine.completeFightUnit(rng))} />
       </>}
     </>}
     {combat?.move && <>

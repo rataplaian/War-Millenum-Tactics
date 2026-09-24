@@ -1,3 +1,5 @@
+import { loneOperativeDistance } from '../abilities/registry';
+import { edgeDistance } from '../utils/geometry';
 import { onBattlefield } from '../reserves/location';
 import type { GameState, Model, Position3, TerrainFeature, Unit, VisibilityResult } from '../models';
 import { baseRadius, EPSILON } from '../utils/geometry';
@@ -65,7 +67,8 @@ export function createVisibilityProvider(input: GameState, detection: DetectionR
     }
     // Compatibility injection only; default Shooting always uses the primitive provider.
     if (legacyPolicy) { anyClear = legacyPolicy(observer, target, state.battlefield); full = anyClear; }
-    const visible = anyClear && (!enemy || !hidden || detected);
+    const lone = loneOperativeDistance(state, unitForModel(state, target));
+    const visible = anyClear && (!enemy || ((!hidden || detected) && (lone === null || unitForModel(state, target).models.some(m => m.alive && edgeDistance(observer, m) <= lone + EPSILON)))); // 24.24
     const result: VisibilityResult = { level: visible ? full ? 'FULLY_VISIBLE' : 'VISIBLE' : 'NOT_VISIBLE', hasLineOfSight: anyClear, terrainFullyVisible: terrainFull, hidden, withinDetection: detected };
     cache.set(key, result); return { ...result };
   }

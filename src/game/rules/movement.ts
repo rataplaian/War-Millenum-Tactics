@@ -1,3 +1,4 @@
+import { movementAbilities } from '../abilities/movement';
 import { modelDefinition } from '../attachments/queries';
 import { temporalBlock } from '../flow/TimingWindows';
 import { effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
@@ -66,7 +67,7 @@ export function validateModelMove(state: GameState, modelId: string, target: Pos
   if (!isFinitePosition(target)) return failure('INVALID_POSITION');
   const terrainPath = validateTerrainPath(state, model, target, path);
   const distance = terrainPath.ok ? terrainPath.value.totalMovementDistance : distanceTravelled(model.position, target);
-  const allowance = effectiveCharacteristic(state, unit.id, 'MOVE', modelDefinition(state, unit, model).stats.movement, model.id) + (state.movement.bonus ?? 0);
+  const allowance = Math.max(0, effectiveCharacteristic(state, unit.id, 'MOVE', modelDefinition(state, unit, model).stats.movement, model.id) + (state.movement.bonus ?? 0) - movementAbilities(state, model).penalty);
   const remaining = Math.max(0, allowance - model.movementUsed);
   if (distance > remaining + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining };
   if (!terrainPath.ok) return terrainPath;

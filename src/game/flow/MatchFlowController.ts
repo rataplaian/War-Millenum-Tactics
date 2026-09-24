@@ -1,3 +1,4 @@
+import { pendingCoreChoices } from '../abilities/core';
 import { PHASES, type CommandResult, type GameState } from '../models';
 import { actionBusy, battleStarted, onBattlefield } from '../reserves/location';
 import { isUnitEngaged } from '../rules/spatial';
@@ -38,6 +39,7 @@ export class MatchFlowController {
     if (s.status !== 'in-progress') blockingReasons.push('MATCH_FINISHED');
     if (!battleStarted(s)) blockingReasons.push('PRE_BATTLE');
     if (actionBusy(s)) blockingReasons.push('TRANSACTION_OPEN');
+    if (pendingCoreChoices(s).length) blockingReasons.push('ABILITY_CHOICE_REQUIRED');
     if (f?.window) blockingReasons.push('TIMING_WINDOW_OPEN');
     if (f?.pending.length) blockingReasons.push(...f.pending.map(p => `PENDING:${p.id}`));
     if (s.phase === 'Command' && f?.commandStep) blockingReasons.push(`COMMAND_STEP:${f.commandStep}`);

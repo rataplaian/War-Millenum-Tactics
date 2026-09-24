@@ -23,6 +23,8 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
       </View>)}
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
+    {state.attackJob && <Button title="CONTINUE ATTACK" disabled={!!flow.window} onPress={() => report(engine.resumeAttack(rng), 'Attack continued.')} />}
+    {state.destructionQueue?.some(q => !q.resolved && !q.waitForAttackerId) && <Button title="RESOLVE DESTRUCTION EFFECTS" onPress={() => report(engine.resolveDestructionEffects(rng), 'Destruction effects resolved.')} />}
     <Text style={text}>Active temporary effects</Text>
     {flow.effects.filter(e => e.active).map(e => <Text key={e.id} style={text}>{e.target.unitId}: {e.source} · {JSON.stringify(e.payload)} · expires {e.expiry} ({e.expiryPlayerId})</Text>)}
     {state.events.filter(e => e.type === 'flow' && e.name === 'BATTLE_SHOCK_ROLL_RESOLVED').slice(-2).map(e => <Text key={e.sequence} style={text}>{e.type === 'flow' ? `${e.unitId}: ${JSON.stringify(e.detail)}` : ''}</Text>)}

@@ -111,11 +111,11 @@ New modules:
 
 ### Shooting transaction and commands
 
-`beginShooting(unitId)` requires Shooting phase, the active player's living unit, no previous completed shooting action, a ranged profile, no engagement and no open movement/shooting transaction. `getRangedWeapons(unitId)` lists unused profiles; `getLegalTargets(unitId, weaponId)` returns enemy units with eligible firing model IDs and nearest living-pair distance. Queries do not consume RNG or mutate state and can also be used before beginning an action.
+`beginShooting(unitId)` requires Shooting phase, the active player's living unit, no previous completed shooting action, an eligible ranged profile and no open movement/shooting transaction. Task 009 narrows Advanced units to Assault weapons and engaged units to Close-Quarters/Monster/Vehicle permissions. `getRangedWeapons(unitId)` lists unused profiles; `getLegalTargets(unitId, weaponId)` returns enemy units with eligible firing model IDs and nearest living-pair distance. Queries do not consume RNG or mutate state and can also be used before beginning an action.
 
-`fireWeapon(weaponId, targetUnitId, rng)` validates the action before consuming any RNG. Each ranged profile may fire once per action, even if it generates no hits. Different profiles can target different units. Every living eligible model has the unit definition's ranged profiles: heterogeneous per-model equipment is deliberately deferred.
+`fireWeapon(weaponId, targetUnitId, rng)` validates the action before consuming any RNG. Each ranged profile may fire once per action, even if it generates no hits. Different profiles can target different units. Source-aware ownership from Task 008 determines each model's available profiles; Task 009 adds per-model One Shot consumption.
 
-`completeShooting()` marks hasShot, even if no weapon was fired. `cancelShooting()` leaves hasShot unset and is allowed only while hasRolled is false. Dice-based attacks that roll zero still lock cancellation. Fixed zero attacks consume no RNG and can still be cancelled. Cancellation appends an event rather than deleting history. Phase/turn progression and movement cannot proceed during an open shooting action. Normal turn transitions reset hasShot.
+`completeShooting(rng?)` marks hasShot, even if no weapon was fired. `cancelShooting()` leaves hasShot unset and is allowed only while hasRolled is false. Dice-based attacks that roll zero still lock cancellation. Fixed zero ordinary attacks consume no RNG and can still be cancelled; selection of One Shot or Hazardous weapons commits their consequences. Cancellation appends an event rather than deleting history. Phase/turn progression and movement cannot proceed during an open shooting action. Normal turn transitions reset hasShot.
 
 Expected failures are domain results and change neither health, transaction, events nor RNG. Resolution works on detached target data before committing, so a broken injected RNG/allocation policy can throw without partially changing battle state. Such programming errors cannot restore the external RNG stream: callers must repair the provider and restart from a known stream, not assume RNG rollback.
 
@@ -131,7 +131,7 @@ All random calls use the supplied RandomSource via the existing D6 helpers. The 
 
 1. Resolve attacks independently for each eligible firing model in stable model order. Fixed values require no rolls; dice values record each roll and modifier result. Catalog validation rejects negative possible outcomes, invalid die counts/sides and unsafe integer values.
 2. Resolve each generated attack completely before the next: hit D6 against Skill, wound D6 against the centralized strength/toughness threshold, armour save, then damage for an unsaved wound.
-3. Wound targets are 2/3/4/5/6 according to the Task 003 strength-versus-toughness relationship. Skills are 2–6; Task 005 supplies temporary per-firing-model Cover/Plunging Fire modifiers. Rerolls and critical effects remain absent.
+3. Wound targets are 2/3/4/5/6 according to the Task 003 strength-versus-toughness relationship. Skills are 2–6; Task 005 supplies temporary per-firing-model Cover/Plunging Fire modifiers. Task 009 centralizes critical outcomes, reroll permissions and per-attack records in `combat/AttackPipeline.ts`.
 4. Required save is `Save - signedAP`. Save data supports 2–7 and AP is a non-positive integer. Requirements above 6 are automatically unsaved with a null save roll and no RNG consumption.
 5. Resolve fixed/dice damage and allocate to a wounded living model first, otherwise the first living model in stable snapshot array order. Allocation is a separate injectable pure policy. It selects from the target unit's living models, not just those originally visible/in range; this is an explicit prototype unit-wide allocation convention.
 6. Damage applies to exactly one model. Excess is lost; zero wounds means alive=false. Dead models stay in state and disappear from circles and subsequent movement/spatial/shooting queries.
@@ -142,7 +142,7 @@ If the unit is destroyed, stop further hit/wound/save/damage rolls. `attacks` re
 
 GameEvent preserves all movement variants and adds shooting-started, weapon-fired, model-damaged, model-destroyed, shooting-cancelled and shooting-completed. Every event uses deterministic sequence/round/turn/player/unit context. weapon-fired includes eligible model IDs, per-model attack rolls/counts, hit/wound rolls, saves, damage rolls, applied/excess damage and casualty IDs. It is followed by ordered damage/casualty detail events. The UI consumes these events directly; it does not recalculate combat outcomes. This remains a lightweight debug history, not event sourcing or a complete replay executor.
 
-Weapon traits remain inert data. Future attack-count/hit/wound/save stages can add weapon modifiers, Torrent, Rapid Fire, Sustained/Lethal Hits, Devastating Wounds, rerolls, invulnerable saves and Feel No Pain without moving rules into UI. Eligibility and visibility policies are the extension points for Pistols, Indirect Fire and reaction shooting; allocation is the seam for Precision, attachments and player choice. None of those mechanics is implemented here.
+Task 009 activates the typed universal weapon catalog through the shared pipeline described below. Known legacy trait IDs map to typed abilities through a fixed compatibility table; arbitrary UI labels are never parsed as rules. Existing allocation, visibility and movement policies remain authoritative.
 
 
 ## Charge and Fight subsystem (Task 004)
@@ -339,7 +339,7 @@ Command uses START_OF_COMMAND_PHASE → GAIN_CORE_CP → BATTLE_SHOCK → COMMAN
 
 Timing windows are serialized by ID, trigger, actor, optional unit/target context and passed player IDs. Start-turn/phase/Command windows queue deterministically; only the current window is usable. Both players pass to close it. A successful stratagem clears passes so reactions can be reconsidered. Pass is not cancellation of a committed attack. No query emits events.
 
-The adapters currently open start/end turn and phase, start/end Command, failed Battle-shock, Shooting target selection, completed shooting, completed charge and completed fight windows. AFTER_HIT_ROLL and AFTER_WOUND_ROLL are typed extension points only: the shared attack resolver remains atomic per weapon. Adding a real reroll stratagem will require a resumable attack transaction; this task does not claim mid-roll reactions or implement a reroll catalog.
+`AFTER_HIT_ROLL` and `AFTER_WOUND_ROLL` are connected to real pausable attack jobs by Task 009. They open only when the injected stratagem catalog offers a legal reaction; PASS plus `resumeAttack(rng)` continues from the stored die. See the universal combat subsystem below.
 
 ### CP and Battle-shock
 
@@ -394,7 +394,7 @@ Abilities carry UNIT/MODEL scope and source identity. Optional model abilities a
 
 Component destruction emits an event with only the destroyed component's original keywords. Bodyguard destruction or loss of all attached Characters schedules separation. Attack-caused separation waits for `finishAttacker`; other casualties separate after their transaction commits. Original runtime IDs return, preserving wounds, shock, action flags, location, embark records and shooting history. Living components inherit still-active unit-targeted effects; dead components have parent/move locks removed. Fight eligibility/completion lists and legacy Fights First effects are remapped. Archived runtime identities keep historical events and inactive effects resolvable after splitting. Catalog/source history remains immutable.
 
-The pre-existing attack pipeline resolves individual attacks sequentially. This task does not introduce a complete batched-save/allocation-order UI or the full universal weapon keyword pack. Defenders' equivalent allocation choices use deterministic group/model order.
+The shared attack pipeline resolves individual attacks sequentially. Task 009 extends its weapon abilities and reactions without introducing a batched-save/allocation-order UI. Defenders' equivalent allocation choices use deterministic group/model order.
 
 ### Location, capacity and embark
 
@@ -430,3 +430,73 @@ Dedicated Transports derive Scouts only if every living passenger model has Scou
 Schema stays 3: all additions are optional and legacy meaning is unchanged. `validateTransportState` rejects orphan parents, over-capacity manifests, invalid component provenance, emergency queues and altered borrowed profiles. Historical lookup is permitted for archived event/effect references; active transactions still require live runtime entities. Capacity and manifest are recomputed from serialized sources. RNG state and injected policies remain caller-owned, consistent with prior tasks.
 
 Task 008 adds 64 deterministic tests to the unchanged 427-test baseline (491 total), including both successful transactions and rejection/rollback paths, source-aware attack integration, deferred splits, Firing Deck snapshots, multiple emergency passengers, impossible oversized bases and existing Scout transaction reuse. App/engine typechecks and both mobile exports are required. No physical-device or simulator interaction has been claimed.
+
+## Task 009 — universal combat abilities
+
+Reference: the official 11th-edition core PDF linked above, September 2026 snapshot, principally Section 24 and Shooting 10.05–10.07. `abilities/types.ts` records the individual rule identifiers in `RULE_IDS` and `CORE_ABILITY_RULES`. These are original implementations and concise behavioral notes, not reproduced rulebook text.
+
+### Typed data and responsibilities
+
+`WeaponAbilityDefinition` has a stable instance ID, type, optional value/threshold, keyword and target-keyword conditions, source and metadata. `weaponAbilities` is the typed list; old `traits` use a fixed ID compatibility map. Pistol normalizes to Close-Quarters. The registry selects one instance of each duplicated kind, even if its parameters/keywords differ. Missing choices produce `ABILITY_CHOICE_REQUIRED` before attack dice. `setAttackChoices` cannot grant a reroll without a data-defined permission.
+
+Core duplicates store a chosen instance index on the runtime model. `getPendingCoreChoices`/`chooseCoreAbility` expose required choices, and action/flow guards prevent resolving with an unchosen duplicate. Scouts retains its established shared-distance rule. `coreAbilityCatalog` bridges existing Deep Strike/Scouts/Infantry deployment data, attachment Leader/Support data and transport Firing Deck data; none of those controllers was replaced.
+
+| Ability / behavior | Authoritative module |
+| --- | --- |
+| Anti, Lethal Hits, Sustained Hits, Torrent, Devastating Wounds | `combat/AttackPipeline.ts`, critical helpers in `combat/dice.ts` |
+| Rapid Fire, Blast, Cleave, Melta | Shared attack count/damage stages, existing base-edge measurement |
+| Heavy, Lance, Psychic | `combat/modifiers.ts`, shared pipeline and existing temporary effects |
+| Twin-linked / generic rerolls | `combat/dice.ts`, explicit permissions and die history |
+| Assault, Close-Quarters / Pistol, Indirect Fire | `rules/shootingTargets.ts`, shared Hit stage, VisibilityProvider |
+| Ignores Cover, Stealth | `terrain/attackModifiers.ts`, existing Benefit of Cover |
+| Extra Attacks | `engine/CloseCombatController.ts`, per-model regular/extra weapon usage |
+| One Shot | Runtime `Model.oneShotExpended`, original weapon identity in registry |
+| Hazardous | Existing `transports/HazardRoll.ts`, unit-completion commands |
+| Precision | Existing `attachments/AllocationGroups.ts` and visibility-constrained selection |
+| Feel No Pain / mortal wounds | `combat/damage.ts` |
+| Deadly Demise | `combat/destruction.ts`, iterative deferred destruction queue |
+| Hover / Super-heavy Walker | `abilities/movement.ts`, existing shared terrain path validator |
+| Lone Operative | `abilities/registry.ts`, VisibilityProvider and ranged targeting |
+| Fights First | Existing FightSequenceController and temporary effects, with core lookup |
+| Deep Strike / Infiltrators / Scouts | Existing deployment/setup/reserve controllers |
+| Firing Deck / Leader / Support | Existing transport and attachment controllers |
+| Normal / invulnerable saves | `combat/save.ts`, existing source-model allocation groups |
+
+### Shared attack state machine
+
+`createAttackJob` builds a context per eligible bearer and resolves attack-count expressions. `runAttackJob` is the sole Hit → Wound → Allocate → Save → Damage → FNP implementation for Shooting and melee; `resolveCombat` remains its synchronous compatibility facade. Fixed, D3, D6 and flat-modifier expressions use explicit RNG. A prototype guard rejects more than 10,000 generated attacks per bearer.
+
+Contexts freeze source identities, weapon/ability choices, selection distance/count, visibility, movement, engagement and charge data. Shooting captures target-count and distance before `AFTER_TARGET_SELECTED`, so reactions do not silently change Blast/Rapid Fire inputs. The visibility provider is shared within job creation rather than rebuilt per attack. Current temporary modifiers are read at the relevant stage, allowing a legal reaction to affect the pending roll without changing catalog data.
+
+Each attack records its original/rerolled dice, critical/automatic outcomes, additional-hit provenance, chosen save, damage/mortals, ignored wounds and casualties. Additional hits are explicit non-critical records; Lethal auto-wounds do not become critical wounds. Devastating damage waits until the weapon's normal damage finishes and caps each critical wound at one allocated model. Deferred entries reference record indices so JSON snapshots do not depend on object identity.
+
+`combat/dice.ts` supports kind/source, individual-die or full-roll reroll permissions and a `wasRerolled` guard. Hit/Wound/Save rerolls occur at their roll stages; attack-count/Damage expressions retain individual die records. Player preferences select among granted permissions; they cannot create a permission. Critical thresholds default to 6 and can be supplied by `GameState.combatRules`. Lone Operative defaults to 12 inches in the same rules object; parameterized ability instances can override it.
+
+Characteristic modifiers reuse the existing EffectEngine and attached source effects. Records contain source, target, amount, timing, stacking and priority. BS/WS changes remain distinct from Hit/Wound changes; the net roll delta is capped after gathering weapon and effect modifiers. AP changes only armour saves. The best legal armour/invulnerable target is selected before rolling, then FNP runs per lost wound. Mortal wounds share that FNP/allocation path for Devastating Wounds, Hazard and Deadly Demise.
+
+### 11th-edition interactions
+
+- Heavy uses the actual at-most-3-inch movement condition, not a historical stationary-only interpretation.
+- Stealth grants Cover when every living model has it. Ignores Cover suppresses Cover, including Stealth, but never ignores visibility, Obscuring or terrain geometry.
+- Psychic can retain modifiers, ignore penalties, or ignore all BS/WS and Hit modifiers. No Psychic phase exists.
+- Indirect shooting is an explicit unit mode locked after its first weapon. Indirect weapons can target unseen units, grant Cover and disallow Hit rerolls. Unmodified 1–5 fail, or 1–3 when stationary with a friendly spotting unit. Other weapons still need visibility. Lone Operative remains a target restriction even for indirect shots.
+- Non-Monster/Vehicle models select Close-Quarters or other ranged profiles. Advanced and engaged permissions cannot be combined arbitrarily. Blast cannot attack a target the shooting unit is engaged with.
+- Extra Attacks tracks additional weapons separately from the one regular melee choice and blocks completion while legally required selections remain. One Shot keys use original model/weapon provenance, surviving turn resets, embark and attached separation.
+
+### Reactions, irreversible work and destruction
+
+After each actual Hit/Wound die, the engine emits a structured flow event. An offered legal roll reaction opens the existing timing window and stores `GameState.attackJob`; otherwise resolution continues immediately. Torrent skips Hit dice/windows; Lethal auto-wounds skip Wound dice/windows. Both players PASS through the existing framework, then `resumeAttack(rng)` continues. New attack/finish/cancel commands cannot bypass a pending job. RNG continuation remains caller-owned; a snapshot does not rewind or recreate the external RNG stream.
+
+Hazardous counts selected weapons/bearers, not attack dice, and resolves after the unit's attacks. Completion requires an RNG only when needed. Damage/weapon selection and job cursors commit atomically from detached drafts; a provider exception cannot partly update game state.
+
+Deadly Demise captures each destroyed model once, preserves its base/provenance and waits for the attacking unit to finish. Emergency passenger placement takes priority over explosions. `resolveDestructionEffects(rng)` drains available queue entries iteratively; a new destroyed transport pauses the queue for its passengers. New explosions append entries instead of recursively resolving them. Unresolved released entries block phase progression. Normalization never makes dead models participate in movement/visibility, but frozen queue geometry remains available for range queries.
+
+### Movement, snapshots, UI and limits
+
+Normal/Advance/Fall Back and Charge accept a taking-to-skies choice before movement. Flying models use the existing horizontal/vertical path, ignore vertical cost and traverse terrain; final support/bounds/collision rules still apply. The allowance loses 2 inches unless Hover applies. Super-heavy Walker uses the same path validator for sections up to 4 inches, blocks traversal through TITANIC models and optionally gains movement-local MOBILE permission; completion D6=1 applies Battle-shock. Cancellation restores positions and removes transaction-local choices. No new geometry engine or permanent keyword mutation is introduced.
+
+Schema remains 3 with optional additive fields: attack job, core instance choices, One Shot usage, Hazardous counters, movement choices, critical configuration and destruction queue. `validateAttackState` checks references, pause cursor/die, choice data, selection inputs and queued destruction identities. Old snapshots continue to load unchanged. This remains a trusted typed loader, not a complete hostile-JSON schema validator.
+
+The debug UI adds only continuation/destruction buttons to existing controls and passes RNG to unit completion. Advanced selection policies are engine APIs, not a new UI editor. Existing simple circular geometry, sampled LOS, bounded placement search, deterministic defender allocation and caller-owned RNG limitations remain. The current stratagem options UI/catalog uses single-target selectors; no full reroll-stratagem pack, final graphics, persistent saves, real datasheets or device testing is added.
+
+Task 009 validation is the unchanged 491-test baseline plus 77 focused tests (568 total), app TypeScript, isolated engine TypeScript and `git diff --check`. CI runs those inexpensive checks. Android/iOS exports remain available only as a manually opted-in workflow step and were not run for Task 009; dependencies are unchanged.

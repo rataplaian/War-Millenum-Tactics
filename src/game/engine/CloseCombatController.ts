@@ -1,3 +1,7 @@
+import { movementAbilities, validateMovementAbilities, type MovementAbilityChoices } from '../abilities/movement';
+import { hasWeaponAbility, resolvedAbilities, weaponInstanceId } from '../abilities/registry';
+import { createAttackJob, runAttackJob, type RollWindow } from '../combat/AttackPipeline';
+import type { AttackJob } from '../combat/types';
 import { modelHasWeapon } from '../attachments/queries';
 import { applyEffect } from '../effects/EffectEngine';
 import { battleStarted, setupBusy } from '../reserves/location';
@@ -9,7 +13,6 @@ import { definitionFor, failure, validateFinalPosition } from '../rules/movement
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { canDeclareCharge, COMBAT_RULES, emptyCloseCombat, engagedTargets, enemies, findChargeFormation, getModelsEligibleToFight, living, reachablePositions, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
 import { eligibleFighters, nextFightSelection, otherPlayer } from '../rules/FightSequenceController';
-import { resolveCombat } from '../rules/resolveCombat';
 import type { DamageAllocationPolicy } from '../rules/damageAllocation';
 
 type Payload = CloseCombatEvent extends infer E ? E extends CloseCombatEvent ? Omit<E, 'sequence' | 'round' | 'turn' | 'playerId' | 'unitId'> : never : never;
@@ -25,17 +28,18 @@ export class CloseCombatController {
   }
   private phase(phase: 'Charge' | 'Fight'): CommandResult {
     if (!battleStarted(this.state)) return failure('PRE_BATTLE');
-    if (setupBusy(this.state)) return failure('SETUP_IN_PROGRESS');
+    if (setupBusy(this.state) && !(this.state.closeCombat?.fight?.selected && this.state.transportState?.destroyed.length && !this.state.transportState.disembark)) return failure('SETUP_IN_PROGRESS');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (this.state.phase !== phase) return failure('WRONG_PHASE');
     if (this.state.movement || this.state.shooting) return failure('COMBAT_IN_PROGRESS');
     return success();
   }
-  declareCharge(unitId: string, rng: RandomSource, exceptions: ChargeExceptions = {}): CommandResult<number> {
+  declareCharge(unitId: string, rng: RandomSource, exceptions: ChargeExceptions = {}, abilityChoices: MovementAbilityChoices = {}): CommandResult<number> {
     const legal = canDeclareCharge(this.state, unitId, exceptions);
     if (!legal.ok) return legal;
+    if (!validateMovementAbilities(this.state, this.unit(unitId), abilityChoices, true)) return failure('INVALID_ABILITY_CHOICE');
     const rolls = rollD6s(2, rng), distance = rolls.reduce((a, b) => a + b, 0);
-    this.combat.charge = { unitId, rolls, distance, targetIds: [] };
+    this.combat.charge = { unitId, rolls, distance, targetIds: [], abilityChoices };
     this.combat.declared.push(unitId);
     this.emit(unitId, { type: 'charge-declared' });
     this.emit(unitId, { type: 'charge-rolled', rolls, distance });
@@ -92,7 +96,7 @@ export class CloseCombatController {
     if (!isFinitePosition(position)) return failure('INVALID_POSITION');
     const terrainPath = validateTerrainPath(this.state, model, position, path); if (!terrainPath.ok) return terrainPath;
     const distance = terrainPath.value.totalMovementDistance, total = (move.used[modelId] ?? 0) + distance;
-    if (total > move.allowance + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining: move.allowance - (move.used[modelId] ?? 0) };
+    if (total > move.allowance - movementAbilities(this.state, model).penalty + EPSILON) return { ...failure('EXCEEDS_ALLOWANCE'), distance, remaining: move.allowance - (move.used[modelId] ?? 0) };
     const placement = validateFinalPosition(this.state, unit, model, position, true); if (!placement.ok) return placement;
     const targets = move.targetIds.flatMap(id => living(this.unit(id)));
     const original = move.originals.find(o => o.modelId === modelId)!;
@@ -234,7 +238,7 @@ export class CloseCombatController {
     const selected = this.combat.fight?.selected; if (!selected) return failure('NO_FIGHT_SELECTED');
     return this.beginTacticalMove('overrun', selected.unitId, targetIds);
   }
-  meleeAttack(weaponId: string, targetUnitId: string, rng: RandomSource, allocation?: DamageAllocationPolicy, precisionModelId?: string): CommandResult<WeaponResolution> {
+  meleeAttack(weaponId: string, targetUnitId: string, rng: RandomSource, allocation?: DamageAllocationPolicy, precisionModelId?: string, pause?: (s: GameState, trigger: Parameters<RollWindow>[0], job: AttackJob) => boolean): CommandResult<WeaponResolution> {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     const selected = this.combat.fight?.selected; if (!selected) return failure('NO_FIGHT_SELECTED');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
@@ -245,15 +249,24 @@ export class CloseCombatController {
     const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId);
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     if (weapon.kind !== 'melee') return failure('WEAPON_NOT_MELEE');
-    const models = getModelsEligibleToFight(this.state, unit, target).filter(m => !selected.usedModelIds.includes(m.id) && modelHasWeapon(this.state, unit, m, weaponId));
+    const models = getModelsEligibleToFight(this.state, unit, target).filter(m => (hasWeaponAbility(weapon, 'EXTRA_ATTACKS') ? !selected.extraWeaponsUsed?.includes(`${m.id}|${weapon.id}`) : !selected.usedModelIds.includes(m.id)) && (!hasWeaponAbility(weapon, 'ONE_SHOT') || !m.oneShotExpended?.includes(weaponInstanceId(this.state, unit, m, weapon))) && modelHasWeapon(this.state, unit, m, weaponId));
     if (!models.length) return failure('NO_ELIGIBLE_FIGHTERS');
-    const result = resolveCombat(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, allocation, [], this.state, precisionModelId);
-    this.state.units = this.state.units.map(u => u.id === target.id ? result.target : u);
-    selected.usedModelIds.push(...models.map(m => m.id)); selected.hasRolled = true;
+    const choices = selected.attackChoices?.[weaponId] ?? {};
+    try { resolvedAbilities(this.state, target, weapon, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
+    const job = createAttackJob(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, [], this.state, precisionModelId, choices);
+    if (hasWeaponAbility(weapon, 'EXTRA_ATTACKS')) { selected.extraWeaponsUsed ??= []; selected.extraWeaponsUsed.push(...models.map(m => `${m.id}|${weapon.id}`)); }
+    else selected.usedModelIds.push(...models.map(m => m.id));
+    for (const model of models) if (hasWeaponAbility(weapon, 'ONE_SHOT')) { model.oneShotExpended ??= []; model.oneShotExpended.push(weaponInstanceId(this.state, unit, model, weapon)); }
+    if (hasWeaponAbility(weapon, 'HAZARDOUS')) selected.hazardousCount = (selected.hazardousCount ?? 0) + models.length;
+    selected.hasRolled = true;
     this.emit(unit.id, { type: 'melee-attack-started', weaponId, targetUnitId });
-    this.emit(unit.id, { type: 'melee-attack-resolved', resolution: result.resolution });
-    return { ok: true, value: result.resolution };
+    const complete = runAttackJob(job, rng, this.state, (t, j) => pause?.(this.state, t, j) ?? false, allocation);
+    this.state.units = this.state.units.map(u => u.id === target.id ? job.target : u);
+    if (complete) this.emit(unit.id, { type: 'melee-attack-resolved', resolution: job.resolution });
+    else this.state.attackJob = job;
+    return { ok: true, value: job.resolution };
   }
+
   cancelFightUnit(): CommandResult {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     const fight = this.combat.fight, selected = fight?.selected;
@@ -268,6 +281,11 @@ export class CloseCombatController {
     const fight = this.combat.fight; if (!fight?.selected) return failure('NO_FIGHT_SELECTED');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     const unit = this.unit(fight.selected.unitId);
+    const selected = fight.selected;
+    for (const target of this.state.units.filter(u => u.playerId !== unit.playerId)) for (const m of getModelsEligibleToFight(this.state, unit, target)) {
+      const weapons = definitionFor(this.state, unit).weapons.filter(w => w.kind === 'melee' && modelHasWeapon(this.state, unit, m, w.id));
+      if (weapons.some(w => hasWeaponAbility(w, 'EXTRA_ATTACKS') && !selected.extraWeaponsUsed?.includes(`${m.id}|${w.id}`)) || (selected.extraWeaponsUsed?.some(id => id.startsWith(`${m.id}|`)) && !selected.usedModelIds.includes(m.id) && weapons.some(w => !hasWeaponAbility(w, 'EXTRA_ATTACKS')))) return failure('EXTRA_ATTACKS_PENDING');
+    }
     fight.fought.push(unit.id); unit.state.hasFought = true; fight.selected = null;
     this.emit(unit.id, { type: 'fight-unit-completed' }); return success();
   }

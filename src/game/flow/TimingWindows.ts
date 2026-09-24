@@ -1,3 +1,4 @@
+import { pendingCoreChoices } from '../abilities/core';
 import { expireEffects } from '../effects/EffectEngine';
 import type { GameState, CommandResult } from '../models';
 import type { TimingWindow, Trigger } from './types';
@@ -22,4 +23,4 @@ export function passWindow(s: GameState, playerId: string): CommandResult {
   }
   return { ok: true, value: undefined };
 }
-export const temporalBlock = (s: GameState) => s.flow?.window ? failure('TIMING_WINDOW_OPEN') : s.flow?.pending.length ? failure('PENDING_RESOLUTION') : s.flow && s.flow.boundary !== 'NONE' ? failure('PHASE_BLOCKED') : null;
+export const temporalBlock = (s: GameState) => pendingCoreChoices(s).length ? failure('ABILITY_CHOICE_REQUIRED') : s.flow?.window ? failure('TIMING_WINDOW_OPEN') : s.flow?.pending.length ? failure('PENDING_RESOLUTION') : s.flow && s.flow.boundary !== 'NONE' ? failure('PHASE_BLOCKED') : null;

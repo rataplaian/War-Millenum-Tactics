@@ -41,7 +41,7 @@ export function validateFlowState(s: GameState) {
       !['STACK', 'REPLACE_SAME_SOURCE', 'NON_STACKING', 'HIGHEST_ONLY'].includes(e.stacking) ||
       !['END_OF_CURRENT_PHASE', 'END_OF_CURRENT_TURN', 'END_OF_BATTLE_ROUND', 'START_OF_NEXT_COMMAND_PHASE', 'END_OF_NEXT_COMMAND_PHASE', 'UNTIL_EXPLICITLY_REMOVED'].includes(e.expiry)) fail();
     if (e.payload.kind === 'MODIFIER') {
-      if (!['MOVE', 'BS', 'WS', 'SAVE', 'LEADERSHIP', 'OC', 'HIT_ROLL', 'WOUND_ROLL'].includes(e.payload.characteristic) || !Number.isFinite(e.payload.value)) fail();
+      if (!['MOVE', 'BS', 'WS', 'SAVE', 'LEADERSHIP', 'OC', 'HIT_ROLL', 'WOUND_ROLL', 'ATTACKS', 'DAMAGE', 'AP', 'STRENGTH'].includes(e.payload.characteristic) || !Number.isFinite(e.payload.value)) fail();
     } else if (e.payload.kind !== 'FLAG' || !e.payload.flag || typeof e.payload.value !== 'boolean') fail();
   }
   for (const u of f.usage) if (!u.stratagemId || !player(u.playerId) || !u.targetIds.length || new Set(u.targetIds).size !== u.targetIds.length || u.targetIds.some(id => !unit(id)) || !integer(u.phaseIndex, 1) || u.phaseIndex > f.phaseIndex || !integer(u.turn, 1) || u.turn > s.turn || !integer(u.round, 1) || u.round > s.round) fail();

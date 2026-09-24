@@ -1,3 +1,5 @@
+import { movementAbilities } from '../abilities/movement';
+import { centreDistance } from '../utils/geometry';
 import { historicalUnit } from '../attachments/queries';
 import type { GameState } from '../models';
 import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
@@ -43,7 +45,7 @@ export function validateCloseCombatState(state: GameState): void {
       const model = source!.models.find(m => m.id === original.modelId);
       require(model && isFinitePosition(original.position) && Number.isFinite(original.movementUsed) && original.movementUsed === model.movementUsed, 'original model');
       const used = move.used[original.modelId] ?? 0;
-      require(Number.isFinite(used) && used >= 0 && used <= move.allowance + EPSILON && distanceTravelled(original.position, model!.position) <= used + EPSILON, 'move distance');
+      require(Number.isFinite(used) && used >= 0 && used <= move.allowance + EPSILON && (movementAbilities(state, model!).flying ? centreDistance(original.position, model!.position) : distanceTravelled(original.position, model!.position)) <= used + EPSILON, 'move distance');
       require(!model!.alive || baseInsideBattlefield({ ...model!, position: original.position }, state.battlefield), 'original bounds');
     }
     require(Object.keys(move.used).every(id => source!.models.some(m => m.id === id)), 'usage model');

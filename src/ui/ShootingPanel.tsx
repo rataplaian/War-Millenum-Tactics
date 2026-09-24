@@ -51,7 +51,7 @@ export function ShootingPanel({ state, engine, rng, report }: Props) {
         report(result, 'Weapon resolved. See the battle log below.');
         if (result.ok) clear();
       }} />
-      <Button title="COMPLETE SHOOTING" onPress={() => { const result = engine.completeShooting(); report(result, 'Shooting completed.'); if (result.ok) clear(); }} />
+      <Button title="COMPLETE SHOOTING" onPress={() => { const result = engine.completeShooting(rng); report(result, 'Shooting completed.'); if (result.ok) clear(); }} />
       <Button title="CANCEL SHOOTING" disabled={action.hasRolled || !!action.selectedTarget} onPress={() => { const result = engine.cancelShooting(); report(result, 'Shooting cancelled.'); if (result.ok) clear(); }} />
       {action.selectedTarget && <Text style={textStyle}>Target committed. Resolve the reaction window, then FIRE.</Text>}
       {action.hasRolled && <Text style={textStyle}>Dice have been rolled: cancellation is no longer available.</Text>}

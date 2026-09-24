@@ -51,5 +51,5 @@ export function validateShootingState(state: GameState): void {
   if (actionEvents.some(e => e.type === 'shooting-cancelled' || e.type === 'shooting-completed' || e.unitId !== source.id || e.turn !== state.turn)) throw new Error('Invalid open shooting history');
   const shots = actionEvents.filter(e => e.type === 'weapon-fired');
   if (shots.length !== transaction.firedWeaponIds.length || shots.some((e, i) => e.resolution.weaponId !== transaction.firedWeaponIds[i]) ||
-      transaction.hasRolled !== shots.some(e => e.resolution.hitRolls.length > 0 || e.resolution.attackCounts.some(a => a.resolved.rolls.length > 0))) throw new Error('Shooting history mismatch');
+      transaction.hasRolled !== (!!state.attackJob || shots.some(e => e.resolution.hitRolls.length > 0 || e.resolution.woundRolls.length > 0 || e.resolution.attackCounts.some(a => a.resolved.rolls.length > 0)))) throw new Error('Shooting history mismatch');
 }

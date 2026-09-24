@@ -1,5 +1,6 @@
+import type { UniversalCoreAbility } from '../abilities/types';
 import type { MovementTransaction, Polygon, Position } from '../models';
-export type CoreAbility = { kind: 'INFILTRATORS' | 'DEEP_STRIKE' } | { kind: 'SCOUTS'; distance: number };
+export type CoreAbility = UniversalCoreAbility | { kind: 'INFILTRATORS' | 'DEEP_STRIKE' } | { kind: 'SCOUTS'; distance: number };
 export type UnitLocation = 'EMBARKED' | 'BATTLEFIELD' | 'STRATEGIC_RESERVES' | 'RESERVES' | 'DESTROYED';
 export type DeploymentAbilityChoice = 'SCOUTS' | 'INFILTRATORS';
 export type IngressMethod = 'STRATEGIC_EDGE' | 'DEEP_STRIKE';

@@ -1,3 +1,4 @@
+import { validateCoreAbilities } from '../abilities/validation';
 import type { GameState } from '../models';
 import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { edges, segmentCrossParameters } from '../terrain/geometry';
@@ -8,13 +9,13 @@ export function validateDeploymentState(s: GameState): void {
   const require = (condition: unknown, why: string) => { if (!condition) throw new Error(`Invalid deployment snapshot: ${why}`); };
   const player = (id: string) => s.players.some(p => p.id === id), unit = (id: string) => s.units.find(u => u.id === id);
   const uniqueUnits = (ids: string[]) => new Set(ids).size === ids.length && ids.every(id => unit(id));
-  const abilityList = (abilities: readonly { kind: string; distance?: number }[] | undefined) => require(!abilities || abilities.every(a => ['SCOUTS', 'INFILTRATORS', 'DEEP_STRIKE'].includes(a.kind) && (a.kind !== 'SCOUTS' || (Number.isFinite(a.distance) && a.distance! >= 0))), 'abilities');
-  for (const d of s.definitions) { require(d.points === undefined || (Number.isSafeInteger(d.points) && d.points >= 0), 'points'); abilityList(d.coreAbilities); }
+  const abilityList = (abilities: readonly { kind: string; distance?: number }[] | undefined) => require(!abilities || abilities.every(a => ['SCOUTS', 'INFILTRATORS', 'DEEP_STRIKE', 'FEEL_NO_PAIN', 'DEADLY_DEMISE', 'LONE_OPERATIVE', 'STEALTH', 'HOVER', 'SUPER_HEAVY_WALKER', 'FIGHTS_FIRST'].includes(a.kind) && (a.kind !== 'SCOUTS' || (Number.isFinite(a.distance) && a.distance! >= 0))), 'abilities');
+  for (const d of s.definitions) { require(d.points === undefined || (Number.isSafeInteger(d.points) && d.points >= 0), 'points'); abilityList(d.coreAbilities); validateCoreAbilities(d.coreAbilities); }
   for (const u of s.units) {
     require(u.location === undefined || ['BATTLEFIELD', 'STRATEGIC_RESERVES', 'RESERVES', 'DESTROYED', 'EMBARKED'].includes(u.location), 'location');
     require(u.location !== 'DESTROYED' || u.models.every(m => !m.alive), 'destroyed health');
     require(!u.location || u.location === 'DESTROYED' || u.models.some(m => m.alive) || s.transportState?.disembark?.unitId === u.id || s.transportState?.destroyed.some(t => t.transportId === u.id), 'living location');
-    u.models.forEach(m => abilityList(m.coreAbilities));
+    u.models.forEach(m => { abilityList(m.coreAbilities); validateCoreAbilities(m.coreAbilities); });
     if (u.reserve) require(typeof u.reserve.initial === 'boolean' && typeof u.reserve.repositioned === 'boolean' && !!u.reserve.reason && Number.isInteger(u.reserve.enteredTurn) && u.reserve.enteredTurn >= 1 && u.reserve.enteredTurn <= s.turn && Number.isInteger(u.reserve.ingressCount) && u.reserve.ingressCount >= 0, 'reserve record');
     if (u.arrival) require(Number.isInteger(u.arrival.turn) && u.arrival.turn >= 1 && u.arrival.turn <= s.turn && ['STRATEGIC_RESERVES', 'DEEP_STRIKE', 'REPOSITION'].includes(u.arrival.method) && ['STRATEGIC_EDGE', 'DEEP_STRIKE'].includes(u.arrival.ingressMethod), 'arrival');
     if (u.moveLock) require(u.moveLock.kind === 'UNTIL_NEXT_CHARGE' && u.moveLock.turn === s.turn && ['Movement', 'Shooting'].includes(s.phase) && u.arrival?.turn === s.turn, 'arrival lock');

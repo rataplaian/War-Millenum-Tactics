@@ -26,14 +26,27 @@ npm test
 npm run typecheck
 npm run typecheck:engine
 npm run check
+# Optional bundling check, not part of Task 009 validation:
 npm run export:mobile
 ```
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 008
+## Current status: Task 009
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
+
+### Universal combat abilities (Task 009)
+
+The shared Shooting/melee pipeline now supports the Section 24 weapon catalog, explicit duplicate-ability choices, qualified unit keywords, critical hits/wounds, controlled rerolls, normal/invulnerable saves, mortal wounds and Feel No Pain. New core behavior includes Deadly Demise, Hover, Lone Operative, Stealth and Super-heavy Walker; existing deployment, attachment and transport abilities keep their controllers.
+
+- `setAttackChoices(weaponId, choices)` chooses duplicate instances, Psychic/Lethal behavior, authorized rerolls and unit-wide Indirect shooting before committing a target. Model-count and range inputs are captured at target selection.
+- One Shot is serialized per original model/weapon, including through attached splits and embark. Hazardous resolves through the existing Hazard utility when the unit finishes; completion accepts an injected RNG when required.
+- Legal Hit/Wound reactions pause the same serializable attack job. Use the existing **PASS** controls, then **CONTINUE ATTACK**. No subsequent dice are consumed while waiting. No reaction catalog is added.
+- `beginMovement(..., { takingToSkies, mobile })` and the Charge equivalent reuse terrain paths. MOBILE requires Super-heavy Walker and a completion D6; Hover removes the sky allowance penalty. Destruction queues wait for remaining attacks and Emergency Disembarks, then use **RESOLVE DESTRUCTION EFFECTS** when needed.
+- Fixtures and new tests use invented technical profiles. UI remains deliberately minimal; advanced ability choices are engine APIs rather than new panels.
+
+Task 009 validation: **568 tests** (491 previous tests unchanged + 77 new tests), app/isolated-engine TypeScript and diff checks. No mobile exports, dependency upgrades or device builds were run for this task. CI runs the inexpensive `npm run check`; mobile exports are opt-in through the workflow's `mobile_export` dispatch input.
 
 ### Transports and Attached Units (Task 008)
 

@@ -11,15 +11,16 @@ import { isUnitEngaged } from './spatial';
 import { edgeDistance, EPSILON } from '../utils/geometry';
 import type { VisibilityPolicy } from './visibility';
 import { createVisibilityProvider, type VisibilityProvider } from '../terrain/visibility';
+import { canShootAfterMove, thrillTargetLegal } from '../content/factionRules';
 /** Centralized prototype engagement restriction. No pistol/vehicle exceptions. */
 export function normalShootingAllowed(state: GameState, unit: Unit): boolean {
- return !isUnitEngaged(state, unit) || unitKeywords(state, unit).some(k => k === 'MONSTER' || k === 'VEHICLE') || rangedLoadout(state, unit).some(w => hasWeaponAbility(w, 'CLOSE_QUARTERS'));
+ return !isUnitEngaged(state, unit) || unitKeywords(state, unit).some(k => k === 'MONSTER' || k === 'VEHICLE') || effectiveFlag(state,unit.id,'RANGED_PISTOL') || rangedLoadout(state, unit).some(w => hasWeaponAbility(w, 'CLOSE_QUARTERS') || hasWeaponAbility(w,'PISTOL'));
 }
 /** 10.05/10.06: weapon eligibility is narrower than unit eligibility. */
 export function getEligibleRangedWeapons(state: GameState, unit: Unit) {
- return rangedLoadout(state, unit).filter(w => (!unit.state.hasAdvanced || hasWeaponAbility(w, 'ASSAULT')) &&
-  (!isUnitEngaged(state, unit) || unitKeywords(state, unit).some(k => k === 'MONSTER' || k === 'VEHICLE') || hasWeaponAbility(w, 'CLOSE_QUARTERS')) &&
-  unit.models.some(m => m.alive && (!hasWeaponAbility(w, 'ONE_SHOT') || !m.oneShotExpended?.includes(weaponInstanceId(state, unit, m, w)))));
+ return rangedLoadout(state, unit).filter(w => (!unit.state.hasAdvanced || canShootAfterMove(state,unit) || effectiveFlag(state,unit.id,'RANGED_ASSAULT') || hasWeaponAbility(w, 'ASSAULT')) &&
+  (!isUnitEngaged(state, unit) || unitKeywords(state, unit).some(k => k === 'MONSTER' || k === 'VEHICLE') || effectiveFlag(state,unit.id,'RANGED_PISTOL') || hasWeaponAbility(w, 'CLOSE_QUARTERS') || hasWeaponAbility(w,'PISTOL')) &&
+  unit.models.some(m => m.alive && (w.id.startsWith('deck:') || modelHasWeapon(state,unit,m,w.id)) && (!hasWeaponAbility(w, 'ONE_SHOT') || !m.oneShotExpended?.includes(weaponInstanceId(state, unit, m, w)))));
 }
 export function shootingPhaseError(state: GameState): CommandFailure | null {
   const block = temporalBlock(state); if (block) return block;
@@ -39,7 +40,7 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if ((state.mission?.activeActions.some(a => a.unitId === unit.id && a.startedAt.turn === state.turn) && !unitKeywords(state, unit).includes('TITANIC')) ||
-      (unit.cannotShootUntilTurn ?? 0) >= state.turn || unit.state.hasFallenBack || effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
+      ((unit.cannotShootUntilTurn ?? 0) >= state.turn && !canShootAfterMove(state,unit)) || (unit.state.hasFallenBack && !canShootAfterMove(state,unit)) || effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasShot) return failure('ALREADY_SHOT');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (!normalShootingAllowed(state, unit) || (unit.state.hasAdvanced && isUnitEngaged(state, unit))) return failure('UNIT_ENGAGED');
@@ -76,7 +77,8 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
   let applicable;
   try { applicable = resolvedAbilities(state, target, weapon.value, state.shooting?.attackChoices?.[weaponId] ?? {}); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
   const active = (type: string) => applicable.some(a => a.type === type);
-  if (shooter.state.hasAdvanced && !active('ASSAULT')) return failure('UNIT_NOT_ELIGIBLE');
+  if (shooter.state.hasAdvanced && !active('ASSAULT') && !canShootAfterMove(state,shooter) && !effectiveFlag(state,shooter.id,'RANGED_ASSAULT')) return failure('UNIT_NOT_ELIGIBLE');
+  if (!thrillTargetLegal(state,shooter,target.id)) return failure('TARGET_SELECTION_LOCKED');
   const livingTargets = target.models.filter(m => m.alive);
   if (!livingTargets.length) return failure('TARGET_DESTROYED');
   const livingShooters = shooter.models.filter(m => m.alive && (weaponId.startsWith('deck:') || modelHasWeapon(state, shooter, m, weaponId)));
@@ -86,7 +88,7 @@ export function validateShootingTarget(state: GameState, unitId: string, weaponI
     let eligible = false;
     if (hasWeaponAbility(weapon.value, 'ONE_SHOT') && model.oneShotExpended?.includes(weaponInstanceId(state, shooter, model, weapon.value))) return false;
     const heavy = modelKeywords(state, shooter, model).some(k => k === 'MONSTER' || k === 'VEHICLE');
-    const cq = active('CLOSE_QUARTERS');
+    const cq = active('CLOSE_QUARTERS') || active('PISTOL') || effectiveFlag(state,shooter.id,'RANGED_PISTOL');
     const engagedTarget = livingTargets.some(enemy => shooter.models.some(m => m.alive && rangedDistance(m, enemy) <= state.spatialRules.engagementDistance + EPSILON));
     if (isUnitEngaged(state, shooter) && ((!heavy && (!cq || !engagedTarget)) || (engagedTarget && active('BLAST')))) return false;
     if (!heavy && state.shooting?.firedWeaponIds.some(id => { const prior = rangedLoadout(state, shooter).find(w => w.id === id); return prior && modelHasWeapon(state, shooter, model, id) && hasWeaponAbility(prior, 'CLOSE_QUARTERS') !== cq; })) return false;

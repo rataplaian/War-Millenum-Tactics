@@ -4,9 +4,11 @@ export interface TransportCapacityDefinition {
   maximumModels: number; allowedKeywords: readonly string[]; excludedKeywords: readonly string[];
   modelCosts?: readonly { keywords: readonly string[]; cost: number }[];
   firingDeck?: number; dedicated?: boolean;
+  /** Universal 11e permissions granted by a transport ability, independent of datasheet ID. */
+  afterAdvance?: 'SHOCK'; afterNormalMove?: 'ASSAULT';
 }
 export interface EmbarkedState { transportId: string; embarkedAtTurn: number; embarkedAtPhase: Phase; preBattle: boolean }
-export type DisembarkMode = 'RAPID' | 'TACTICAL' | 'COMBAT' | 'EMERGENCY';
+export type DisembarkMode = 'RAPID' | 'TACTICAL' | 'COMBAT' | 'EMERGENCY' | 'SHOCK' | 'ASSAULT';
 export interface HazardResult { rolls: number[]; mortalWounds: number; destroyedModelIds: string[] }
 export interface DisembarkTransaction {
   unitId: string; transportId: string; mode: DisembarkMode; positions: Formation;

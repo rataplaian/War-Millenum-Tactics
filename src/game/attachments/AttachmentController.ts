@@ -31,6 +31,8 @@ export function formAttachments(s: GameState, assignments: readonly AttachmentAs
       stats: { ...definitions[0]!.stats, wounds: Math.max(...definitions.map(d => d.stats.wounds)) },
       keywords: [...new Set(definitions.flatMap(d => [...d.keywords]))], abilities: [], coreAbilities: [],
       weapons: units.flatMap((u, i) => definitions[i]!.weapons.map(w => ({ ...copy(w), id: `${u.id}:${w.id}` }))) };
+    // Mixed profiles belong to each original datasheet; the attached unit has heterogeneous components.
+    delete (d as { modelProfiles?: UnitDefinition['modelProfiles'] }).modelProfiles;
     const runtime: Unit = { ...copy(units[0]!), id: a.id, definitionId: d.id, startedBattleAttached: true,
       models: units.flatMap(u => u.models.map(m => ({ ...copy(m), unitId: a.id, componentUnitId: u.id, sourceDefinitionId: u.definitionId }))) };
     s.attachments ??= []; s.attachments.push({ id: a.id, active: true, components: units.map((u, i) => ({ role: i === 0 ? 'BODYGUARD' : a.leaderIds?.includes(u.id) ? 'LEADER' : 'SUPPORT', original: copy(u) })), destroyedComponentIds: [], retainedSources: [], pendingSplitBy: [] });
@@ -44,6 +46,7 @@ function split(s: GameState, a: AttachmentRecord, u: Unit) {
   const survivors: Unit[] = a.components.map(c => {
     const models = u.models.filter(m => m.componentUnitId === c.original.id).map(m => ({ ...copy(m), unitId: c.original.id }));
     return { ...copy(c.original), ...copy(u), id: c.original.id, definitionId: c.original.definitionId, models, startedBattleAttached: true,
+      resourceCounters: c.role === 'BODYGUARD' ? copy(u.resourceCounters ?? {}) : copy(c.original.resourceCounters ?? {}),
       location: models.some(m => m.alive) ? u.location : 'DESTROYED' };
   });
   for (const unit of survivors) if (unit.location === 'DESTROYED') { delete unit.embarked; delete unit.moveLock; }

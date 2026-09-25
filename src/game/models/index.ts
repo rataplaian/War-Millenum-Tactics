@@ -8,6 +8,7 @@ import type { TransportCapacityDefinition, EmbarkedState, TransportState, Firing
 import type { EffectPayload } from '../effects/types';
 import type { MatchFlowState, FlowEvent } from '../flow/types';
 import type { CoreAbility, UnitLocation, ReserveRecord, ArrivalRecord, DeploymentState, SetupTransaction, ScoutMoveTransaction, SetupEventType } from '../setup/types';
+import type { StratagemDefinition } from '../stratagems/types';
 export type FactionId = string;
 export type PlayerId = string;
 export type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };
@@ -29,6 +30,9 @@ export type BaseGeometry = { kind: 'circle'; diameterMm: number };
 export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number; forceDisposition?: ForceDisposition }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
+  /** Optional model-specific loadout and characteristics for mixed datasheets. */
+  weaponIds?: string[];
+  stats?: Partial<UnitStats>;
   oneShotExpended?: string[];
   coreAbilityChoices?: Record<string, number>;
   abilities?: Ability[];
@@ -60,6 +64,7 @@ export interface Ability { scope?: 'UNIT' | 'MODEL'; effect?: EffectPayload; whi
 export interface UnitStats { movement: number; toughness: number; save: number; wounds: number; leadership: number; objectiveControl: number }
 export type UnitDefinition = DeepReadonly<{
   id: string; name: string; factionId: FactionId; modelCount: number; stats: UnitStats;
+  modelProfiles?: { count: number; base?: BaseGeometry; stats?: Partial<UnitStats>; weaponIds: string[]; coreAbilities?: CoreAbility[] }[];
   attachment?: AttachmentDefinition; transport?: TransportCapacityDefinition; invulnerableSave?: number;
   points?: number; coreAbilities?: CoreAbility[];
   defaultBase: BaseGeometry;
@@ -68,6 +73,8 @@ export type UnitDefinition = DeepReadonly<{
 export interface UnitState { battleShocked?: boolean; hasAdvanced?: boolean; hasFallenBack?: boolean; hasMoved: boolean; hasShot: boolean; hasCharged: boolean; hasFought: boolean }
 /** Mutable battle data only. Static characteristics resolve through definitionId. */
 export interface Unit {
+  /** Finite source-managed resources, such as Aspect Shrine substitutions. */
+  resourceCounters?: Record<string, number>;
   advanceBonus?: { turn: number; value: number };
   startedBattleAttached?: boolean;
   embarked?: EmbarkedState;
@@ -115,6 +122,17 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  /** Destroyed melee defenders that must strike after their attacker completes its activation. */
+  fightOnDeath?: { defenderUnitId: string; attackerUnitId: string; modelIds: string[] }[];
+  stratagemDefinitions?: StratagemDefinition[];
+  reactionMove?: { unitId: string; source: 'OPPORTUNITY_SEIZED'|'FADE_BACK'; allowance: number;
+    originals: { modelId: string; position: Position }[]; used: Record<string,number> } | null;
+  battleFocus?: { battleSize: 'INCURSION' | 'STRIKE_FORCE' | 'ONSLAUGHT'; round: number; tokens: Record<PlayerId,number>;
+    usedByPhase: Record<string,string[]>; manoeuvresByPhase: Record<string,string[]> };
+  factionRuleIds?: Record<PlayerId, string[]>;
+  factionHistory?: { turn: number; phaseIndex: number; engagedAtTurnStart: Record<string,string[]>;
+    engagedAtPhaseStart?: Record<string,string[]>;
+    attackedByPhase: Record<string,Record<string,string[]>>; chargedByPhase: Record<string,Record<string,string[]>> };
   mission?: MissionState;
   combatRules?: { criticalHitThreshold: number; criticalWoundThreshold: number; loneOperativeDistance: number };
   attackJob?: AttackJob;
@@ -246,9 +264,11 @@ export interface FightPhaseState {
   engagedAtFightStart: string[];
   fought: string[];
   consolidateDone: string[];
-  selected: { attackChoices?: Record<string, AttackChoices>; hazardousCount?: number; extraWeaponsUsed?: string[]; unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
+  consolidationWindowsOffered?: string[];
+  selected: { selectedTarget?: { weaponId: string; targetUnitId: string }; exquisiteChoice?: 'LETHAL_HITS' | 'SUSTAINED_HITS'; attackChoices?: Record<string, AttackChoices>; hazardousCount?: number; extraWeaponsUsed?: string[]; unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
 }
 export interface CloseCombatState {
+  reaction?: { unitId: string; targetUnitId: string };
   charge: ChargeAction | null;
   move: CombatMove | null;
   declared: string[];

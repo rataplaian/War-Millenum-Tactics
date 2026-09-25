@@ -3,7 +3,7 @@ import { hasWeaponAbility, resolvedAbilities, weaponInstanceId } from '../abilit
 import { createAttackJob, runAttackJob, type RollWindow } from '../combat/AttackPipeline';
 import type { AttackJob } from '../combat/types';
 import { modelHasWeapon } from '../attachments/queries';
-import { applyEffect } from '../effects/EffectEngine';
+import { applyEffect, effectiveFlag } from '../effects/EffectEngine';
 import { battleStarted, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CommandResult, CombatMoveKind, CloseCombatEvent, GameState, MovementPath, Position, Unit, WeaponResolution } from '../models';
@@ -13,6 +13,8 @@ import { definitionFor, failure, validateFinalPosition } from '../rules/movement
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { canDeclareCharge, COMBAT_RULES, emptyCloseCombat, engagedTargets, enemies, findChargeFormation, getModelsEligibleToFight, living, reachablePositions, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
 import { eligibleFighters, nextFightSelection, otherPlayer } from '../rules/FightSequenceController';
+import { hasFactionRule, recordFactionTarget, thrillTargetLegal } from '../content/factionRules';
+import { flowEvent } from '../flow/events';
 import type { DamageAllocationPolicy } from '../rules/damageAllocation';
 
 type Payload = CloseCombatEvent extends infer E ? E extends CloseCombatEvent ? Omit<E, 'sequence' | 'round' | 'turn' | 'playerId' | 'unitId'> : never : never;
@@ -30,7 +32,7 @@ export class CloseCombatController {
     if (!battleStarted(this.state)) return failure('PRE_BATTLE');
     if (setupBusy(this.state) && !(this.state.closeCombat?.fight?.selected && this.state.transportState?.destroyed.length && !this.state.transportState.disembark)) return failure('SETUP_IN_PROGRESS');
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
-    if (this.state.phase !== phase) return failure('WRONG_PHASE');
+    if (this.state.phase !== phase && !(phase==='Charge' && this.state.phase==='Movement' && !!this.state.closeCombat?.reaction)) return failure('WRONG_PHASE');
     if (this.state.movement || this.state.shooting) return failure('COMBAT_IN_PROGRESS');
     return success();
   }
@@ -51,10 +53,11 @@ export class CloseCombatController {
     if (!charge) return failure('NO_CHARGE');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     if (!targetIds.length || new Set(targetIds).size !== targetIds.length) return failure('TARGETS_REQUIRED');
-    const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance, charge.distance) + EPSILON);
-    if (targetIds.some(id => !legal.some(u => u.id === id))) return failure('UNREACHABLE_TARGET');
+    const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => thrillTargetLegal(this.state,this.unit(charge.unitId),target.id) && unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance, charge.distance) + EPSILON);
+    if (targetIds.some(id => !legal.some(u => u.id === id)) || (this.combat.reaction && !targetIds.includes(this.combat.reaction.targetUnitId))) return failure('UNREACHABLE_TARGET');
     if (!findChargeFormation(this.state, this.unit(charge.unitId), targetIds, charge.distance)) return failure('UNREACHABLE_TARGET');
     charge.targetIds = [...targetIds];
+    recordFactionTarget(this.state,'chargedByPhase',charge.unitId,targetIds);
     this.emit(charge.unitId, { type: 'charge-target-selected', targetIds: [...targetIds] });
     return this.startMove('charge', charge.unitId, targetIds, charge.distance);
   }
@@ -64,6 +67,7 @@ export class CloseCombatController {
     if (!this.combat.charge) return failure('NO_CHARGE');
     const unitId = this.combat.charge.unitId;
     this.restore(); this.combat.charge = null;
+    delete this.combat.reaction;
     this.emit(unitId, { type: 'charge-failed' }); return success();
   }
   private startMove(kind: CombatMoveKind, unitId: string, targetIds: string[], allowance: number): CommandResult {
@@ -142,9 +146,10 @@ export class CloseCombatController {
     this.combat.move = null;
     if (move.kind === 'charge') {
       unit.state.hasCharged = true;
-      if (this.state.flow) applyEffect(this.state, { source: 'charge', target: { unitId: unit.id }, payload: { kind: 'FLAG', flag: 'FIGHTS_FIRST', value: true }, expiry: 'END_OF_CURRENT_TURN', stacking: 'NON_STACKING' });
-      else this.combat.effects.push({ unitId: unit.id, kind: 'FIGHTS_FIRST', expiresAt: 'END_OF_TURN', turn: this.state.turn });
+      if (this.state.flow && !this.combat.reaction) applyEffect(this.state, { source: 'charge', target: { unitId: unit.id }, payload: { kind: 'FLAG', flag: 'FIGHTS_FIRST', value: true }, expiry: 'END_OF_CURRENT_TURN', stacking: 'NON_STACKING' });
+      else if (!this.state.flow && !this.combat.reaction) this.combat.effects.push({ unitId: unit.id, kind: 'FIGHTS_FIRST', expiresAt: 'END_OF_TURN', turn: this.state.turn });
       this.combat.charge = null;
+      delete this.combat.reaction;
     } else if (move.kind === 'pile-in') this.combat.fight!.pileInDone.push(unit.id);
     else if (move.kind === 'overrun') this.combat.fight!.selected!.overrunDone = true;
     else {
@@ -158,7 +163,7 @@ export class CloseCombatController {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     if (this.combat.fight) return failure('WRONG_FIGHT_STEP');
     this.combat.fight = { step: 'START', category: 'FIGHTS_FIRST', nextPlayerId: this.state.activePlayerId,
-      pileInDone: [], eligibleAtFightStart: [], engagedAtFightStart: [], fought: [], consolidateDone: [], selected: null };
+      pileInDone: [], eligibleAtFightStart: [], engagedAtFightStart: [], fought: [], consolidateDone: [], consolidationWindowsOffered: [], selected: null };
     return success();
   }
   private ordered(units: Unit[]) {
@@ -168,6 +173,7 @@ export class CloseCombatController {
   consolidateUnits() { return this.ordered(this.state.units.filter(u => living(u).length && !this.combat.fight?.consolidateDone.includes(u.id) && (this.combat.fight?.eligibleAtFightStart.includes(u.id) || this.combat.fight?.fought.includes(u.id)))); }
   advanceFightStep(): CommandResult {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
+    if (this.state.fightOnDeath?.length) return failure('PENDING_RESOLUTION');
     const fight = this.combat.fight; if (!fight) return this.startFightPhase();
     if (this.combat.move || fight.selected) return failure('COMBAT_IN_PROGRESS');
     if (fight.step === 'START') fight.step = 'PILE_IN';
@@ -204,11 +210,13 @@ export class CloseCombatController {
     }
     const engaged = engagedTargets(this.state, unit);
     const ids = engaged.length ? engaged.map(u => u.id) : targetIds;
-    const maximum = kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileInTargetDistance;
+    const extended=effectiveFlag(this.state,unit.id,'EXTENDED_TACTICAL_MOVE');
+    const violent=kind==='consolidate' && effectiveFlag(this.state,unit.id,'EXTENDED_ENGAGING_CONSOLIDATE');
+    const maximum = extended ? 8 : violent ? 6 : kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileInTargetDistance;
     if (!ids.length || new Set(ids).size !== ids.length) return failure('TARGETS_REQUIRED');
     if (ids.some(id => !enemies(this.state, unit).some(e => e.id === id && (engaged.length || unitDistance(unit, e) <= maximum + EPSILON)))) return failure('UNREACHABLE_TARGET');
     if (kind === 'overrun') this.emit(unitId, { type: 'overrun-fight' });
-    return this.startMove(kind, unitId, ids, kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileIn);
+    return this.startMove(kind, unitId, ids, extended || violent ? 6 : kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileIn);
   }
   /** Pile-in and consolidation are optional. Explicitly passing consumes that opportunity. */
   skipTacticalMove(unitId: string): CommandResult {
@@ -223,6 +231,7 @@ export class CloseCombatController {
     return success();
   }
   selectFightUnit(unitId: string): CommandResult {
+    if (this.state.fightOnDeath?.length) return failure('PENDING_RESOLUTION');
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     const fight = this.combat.fight;
     if (!fight || fight.step !== 'FIGHT') return failure('WRONG_FIGHT_STEP');
@@ -233,6 +242,27 @@ export class CloseCombatController {
     fight.category = selection.category; fight.nextPlayerId = otherPlayer(this.state, selection.playerId);
     fight.selected = { unitId, usedModelIds: [], hasRolled: false, overrunDone: false, previousPlayerId, previousCategory };
     this.emit(unitId, { type: 'fight-unit-selected' }); return success();
+  }
+  chooseExquisiteSwordsmanship(choice: 'LETHAL_HITS' | 'SUSTAINED_HITS'): CommandResult {
+    const selected=this.combat.fight?.selected;
+    if (!selected || this.state.phase !== 'Fight') return failure('NO_FIGHT_SELECTED');
+    const unit=this.unit(selected.unitId);
+    if (!unit.state.hasCharged || !hasFactionRule(this.state,unit,'EXQUISITE_SWORDSMANSHIP')) return failure('UNIT_NOT_ELIGIBLE');
+    if (selected.exquisiteChoice || selected.hasRolled) return failure('IRREVERSIBLE_ACTION');
+    if (!['LETHAL_HITS','SUSTAINED_HITS'].includes(choice)) return failure('INVALID_ABILITY_CHOICE');
+    selected.exquisiteChoice=choice;
+    return success();
+  }
+  selectMeleeTarget(weaponId:string,targetUnitId:string): CommandResult {
+    const selected=this.combat.fight?.selected;
+    if(!selected || this.state.phase!=='Fight') return failure('NO_FIGHT_SELECTED');
+    if(selected.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
+    const unit=this.unit(selected.unitId),target=this.state.units.find(u=>u.id===targetUnitId);
+    if(!target || target.playerId===unit.playerId || !living(target).length) return failure('TARGET_NOT_ENEMY');
+    const weapon=definitionFor(this.state,unit).weapons.find(w=>w.id===weaponId);
+    if(!weapon || weapon.kind!=='melee') return failure('WEAPON_NOT_MELEE');
+    if(!getModelsEligibleToFight(this.state,unit,target).some(m=>modelHasWeapon(this.state,unit,m,weaponId) && !selected.usedModelIds.includes(m.id))) return failure('NO_ELIGIBLE_FIGHTERS');
+    selected.selectedTarget={weaponId,targetUnitId};return success();
   }
   beginOverrun(targetIds: string[]): CommandResult {
     const selected = this.combat.fight?.selected; if (!selected) return failure('NO_FIGHT_SELECTED');
@@ -249,11 +279,16 @@ export class CloseCombatController {
     const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId);
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     if (weapon.kind !== 'melee') return failure('WEAPON_NOT_MELEE');
+    if(this.state.flow && this.state.factionRuleIds && (selected.selectedTarget?.weaponId!==weaponId || selected.selectedTarget?.targetUnitId!==targetUnitId)) return failure('TARGET_SELECTION_REQUIRED');
     const models = getModelsEligibleToFight(this.state, unit, target).filter(m => (hasWeaponAbility(weapon, 'EXTRA_ATTACKS') ? !selected.extraWeaponsUsed?.includes(`${m.id}|${weapon.id}`) : !selected.usedModelIds.includes(m.id)) && (!hasWeaponAbility(weapon, 'ONE_SHOT') || !m.oneShotExpended?.includes(weaponInstanceId(this.state, unit, m, weapon))) && modelHasWeapon(this.state, unit, m, weaponId));
     if (!models.length) return failure('NO_ELIGIBLE_FIGHTERS');
+    if (unit.state.hasCharged && hasFactionRule(this.state,unit,'EXQUISITE_SWORDSMANSHIP') && !selected.exquisiteChoice) return failure('ABILITY_CHOICE_REQUIRED');
     const choices = selected.attackChoices?.[weaponId] ?? {};
     try { resolvedAbilities(this.state, target, weapon, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     const job = createAttackJob(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, [], this.state, precisionModelId, choices);
+    if (selected.exquisiteChoice) for (const context of job.contexts) context.abilities.push({
+      id: `exquisite-swordsmanship:${context.attackerModelId}`, type: selected.exquisiteChoice,
+      ...(selected.exquisiteChoice === 'SUSTAINED_HITS' ? { value: 1 } : {}), source: 'EXQUISITE_SWORDSMANSHIP' });
     if (hasWeaponAbility(weapon, 'EXTRA_ATTACKS')) { selected.extraWeaponsUsed ??= []; selected.extraWeaponsUsed.push(...models.map(m => `${m.id}|${weapon.id}`)); }
     else selected.usedModelIds.push(...models.map(m => m.id));
     for (const model of models) if (hasWeaponAbility(weapon, 'ONE_SHOT')) { model.oneShotExpended ??= []; model.oneShotExpended.push(weaponInstanceId(this.state, unit, model, weapon)); }
@@ -262,7 +297,16 @@ export class CloseCombatController {
     this.emit(unit.id, { type: 'melee-attack-started', weaponId, targetUnitId });
     const complete = runAttackJob(job, rng, this.state, (t, j) => pause?.(this.state, t, j) ?? false, allocation);
     this.state.units = this.state.units.map(u => u.id === target.id ? job.target : u);
-    if (complete) this.emit(unit.id, { type: 'melee-attack-resolved', resolution: job.resolution });
+    if (complete && effectiveFlag(this.state,target.id,'FIGHT_ON_DEATH') && !target.state.hasFought && !this.combat.fight?.fought.includes(target.id)) {
+      const slain=job.resolution.destroyedModelIds.filter(id=>target.models.some(m=>m.id===id));
+      if(slain.length) {
+        this.state.fightOnDeath ??= [];
+        const pending=this.state.fightOnDeath.find(p=>p.defenderUnitId===target.id && p.attackerUnitId===unit.id);
+        if(pending) pending.modelIds.push(...slain.filter(id=>!pending.modelIds.includes(id)));
+        else this.state.fightOnDeath.push({defenderUnitId:target.id,attackerUnitId:unit.id,modelIds:[...new Set(slain)]});
+      }
+    }
+    if (complete) { delete selected.selectedTarget; this.emit(unit.id, { type: 'melee-attack-resolved', resolution: job.resolution }); }
     else this.state.attackJob = job;
     return { ok: true, value: job.resolution };
   }
@@ -279,6 +323,7 @@ export class CloseCombatController {
   completeFightUnit(): CommandResult {
     const phase = this.phase('Fight'); if (!phase.ok) return phase;
     const fight = this.combat.fight; if (!fight?.selected) return failure('NO_FIGHT_SELECTED');
+    if(fight.selected.selectedTarget) return failure('TARGET_SELECTION_LOCKED');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     const unit = this.unit(fight.selected.unitId);
     const selected = fight.selected;
@@ -287,6 +332,27 @@ export class CloseCombatController {
       if (weapons.some(w => hasWeaponAbility(w, 'EXTRA_ATTACKS') && !selected.extraWeaponsUsed?.includes(`${m.id}|${w.id}`)) || (selected.extraWeaponsUsed?.some(id => id.startsWith(`${m.id}|`)) && !selected.usedModelIds.includes(m.id) && weapons.some(w => !hasWeaponAbility(w, 'EXTRA_ATTACKS')))) return failure('EXTRA_ATTACKS_PENDING');
     }
     fight.fought.push(unit.id); unit.state.hasFought = true; fight.selected = null;
+    if(this.state.fightOnDeath) this.state.fightOnDeath=this.state.fightOnDeath.filter(p=>living(this.unit(p.attackerUnitId)).length>0);
     this.emit(unit.id, { type: 'fight-unit-completed' }); return success();
+  }
+  /** Destroyed models resolve once, after the attacking unit has completed its full activation. */
+  resolveFightOnDeath(defenderUnitId:string,weaponId:string,rng:RandomSource, allocation?:DamageAllocationPolicy):CommandResult<WeaponResolution> {
+    const pending=this.state.fightOnDeath?.[0];
+    if(!pending || pending.defenderUnitId!==defenderUnitId || !this.combat.fight?.fought.includes(pending.attackerUnitId)) return failure('PENDING_RESOLUTION');
+    const defender=this.unit(defenderUnitId),target=this.unit(pending.attackerUnitId);
+    if(!living(target).length) return failure('TARGET_DESTROYED');
+    const weapon=definitionFor(this.state,defender).weapons.find(w=>w.id===weaponId && w.kind==='melee');
+    if(!weapon) return failure('WEAPON_NOT_MELEE');
+    const fighters=pending.modelIds.filter(id=>defender.models.some(m=>m.id===id && modelHasWeapon(this.state,defender,m,weaponId)));
+    if(!fighters.length) return failure('NO_ELIGIBLE_FIGHTERS');
+    const job=createAttackJob(weapon,fighters,target,definitionFor(this.state,target),rng,[],this.state);
+    this.emit(defender.id,{type:'melee-attack-started',weaponId,targetUnitId:target.id});
+    runAttackJob(job,rng,this.state,undefined,allocation);
+    this.state.units=this.state.units.map(u=>u.id===target.id?job.target:u);
+    pending.modelIds=pending.modelIds.filter(id=>!fighters.includes(id));
+    if(!pending.modelIds.length) this.state.fightOnDeath!.shift();
+    this.emit(defender.id,{type:'melee-attack-resolved',resolution:job.resolution});
+    if(this.state.flow) flowEvent(this.state,'FIGHT_ON_DEATH_RESOLVED',{attackerUnitId:target.id,modelIds:fighters,weaponId},defender.id,defender.playerId);
+    return {ok:true,value:job.resolution};
   }
 }

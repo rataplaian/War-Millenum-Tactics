@@ -30,7 +30,7 @@ import type { FlowPolicies, FlowRules } from '../flow/types';
 import { StratagemEngine } from '../stratagems/StratagemEngine';
 import type { StratagemPolicies } from '../stratagems/types';
 import { gainCommandPoints, spendCommandPoints, canSpendCommandPoints } from '../resources/CommandPoints';
-import { applyEffect, effectiveCharacteristic, effectiveObjectiveControl, removeEffect } from '../effects/EffectEngine';
+import { applyEffect, effectiveCharacteristic, effectiveFlag, effectiveObjectiveControl, removeEffect } from '../effects/EffectEngine';
 import type { EffectInput } from '../effects/types';
 import { canStartAction, canCompleteAction, fallBackOptions } from '../command/BattleShock';
 import { DeploymentController, nextDeploymentPlayer } from '../deployment/DeploymentController';
@@ -53,6 +53,10 @@ import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
+import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
+import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
+import { validateTerrainPath } from '../terrain/movement';
+import { isFinitePosition, EPSILON } from '../utils/geometry';
 import { availableRangedWeapons, validateShooter, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
 import { definitionFor } from '../rules/movement';
 import { type VisibilityPolicy } from '../rules/visibility';
@@ -69,6 +73,36 @@ export class GameEngine {
   static create(initialState: GameState, policies: EnginePolicies = {}): GameEngine { return new GameEngine(initialState, policies); }
   loadMatch(snapshot: GameState): void { validateState(snapshot); this.state = copy(snapshot); }
   getState(): GameState { return copy(this.state); }
+  useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource) {
+    return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng));
+  }
+  moveReactionModel(modelId:string,target:Position,path?:MovementPath): CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionMove;
+      if(!tx) return failure('NO_ACTIVE_MOVEMENT');
+      const u=s.units.find(u=>u.id===tx.unitId)!,m=u.models.find(m=>m.id===modelId);
+      if(!m) return failure('MODEL_NOT_IN_UNIT');
+      if(!m.alive || !isFinitePosition(target)) return failure('INVALID_POSITION');
+      const distance=validateTerrainPath(s,m,target,path);if(!distance.ok) return distance;
+      const used=(tx.used[modelId]??0)+distance.value.totalMovementDistance;
+      if(used>tx.allowance+EPSILON) return {...failure('EXCEEDS_ALLOWANCE'),distance:used,remaining:tx.allowance-(tx.used[modelId]??0)};
+      const legal=validateFinalPosition(s,u,m,target);if(!legal.ok) return legal;
+      const from={...m.position};m.position={...target};tx.used[modelId]=used;
+      flowEvent(s,'REACTION_MODEL_MOVED',{modelId,fromX:from.x,fromY:from.y,toX:target.x,toY:target.y},u.id,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
+  completeReactionMove(): CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionMove;if(!tx)return failure('NO_ACTIVE_MOVEMENT');
+      const u=s.units.find(x=>x.id===tx.unitId)!;
+      const coherency=checkCoherency(u.models,s.spatialRules.coherency);
+      if(!coherency.coherent) return {...failure('INCOHERENT'),modelIds:coherency.failingModelIds};
+      s.reactionMove=null;
+      flowEvent(s,'REACTION_MOVE_COMPLETED',{source:tx.source,allowance:tx.allowance},u.id,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
 
   /** Legacy Task 001 helpers. New UI commands use tryNextPhase/tryNextTurn results. */
   nextPhase(): GameState {
@@ -124,8 +158,9 @@ export class GameEngine {
     if (!validateMovementAbilities(this.state, result.value, abilityChoices)) return failure('INVALID_ABILITY_CHOICE');
     if (moveType !== 'NORMAL_MOVE') {
       const draft = this.getState(), unit = draft.units.find(u => u.id === unitId)!;
-      if (!rng && (moveType === 'ADVANCE_MOVE' || !fallBackOptions(draft, unit).orderedRetreat)) return failure('INVALID_CONFIGURATION');
-      const bonus = moveType === 'ADVANCE_MOVE' ? rollD6(rng!) : 0;
+      const fixedAdvance=moveType==='ADVANCE_MOVE' && effectiveFlag(draft,unitId,'FIXED_ADVANCE_SIX');
+      if (!rng && (moveType === 'ADVANCE_MOVE' && !fixedAdvance || !fallBackOptions(draft, unit).orderedRetreat && moveType==='FALL_BACK_MOVE')) return failure('INVALID_CONFIGURATION');
+      const bonus = moveType === 'ADVANCE_MOVE' ? fixedAdvance ? 6 : rollD6(rng!) : 0;
       const desperate = moveType === 'FALL_BACK_MOVE' && !fallBackOptions(draft, unit).orderedRetreat;
       if (desperate) {
         const hazard = resolveHazardRolls(draft, unit, unit.models.filter(m => m.alive).length, rng!);
@@ -208,6 +243,8 @@ export class GameEngine {
     if (draft.movement!.abilityChoices?.mobile) { const roll = rollD6(rng!); if (roll === 1) moved.state.battleShocked = true; flowEvent(draft, 'SUPER_HEAVY_WALKER_TEST', { roll }, moved.id); }
     draft.movement = null;
     draft.events.push({ type: 'movement-completed', unitId: unit.id, playerId: unit.playerId, turn: draft.turn, round: draft.round, sequence: draft.events.length + 1 });
+    if (moveType === 'FALL_BACK_MOVE' && draft.flow && draft.units.some(u => u.playerId !== moved.playerId && (hasFactionRule(draft,u,'BATTLE_FOCUS') &&
+        draft.factionHistory?.engagedAtPhaseStart?.[u.id]?.includes(moved.id) || draft.stratagemDefinitions?.some(d=>d.id==='CUT_DOWN_THE_WEAK') && unitKeywords(draft,u).includes('EMPERORS_CHILDREN')))) openWindow(draft,'AFTER_ENEMY_FALL_BACK',{unitId:moved.id});
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
     this.commit(draft);
     return { ok: true, value: undefined };
@@ -260,10 +297,31 @@ export class GameEngine {
       if (!state.flow) return false;
       const probe = copy(state);
       openWindow(probe, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
-      if (!probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
+      const bearer = state.units.find(u => u.id === job.attackerUnitId);
+      const aspectEligible = !!bearer?.resourceCounters?.ASPECT_SHRINE &&
+        !!bearer.models.find(m => m.id === job.current?.modelId && m.alive && !modelKeywords(state, bearer, m).includes('CHARACTER'));
+      if (!aspectEligible && !probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
       openWindow(state, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
       return true;
     };
+  }
+  /** 11e Aspect Shrine substitutes one paused, unmodified Hit or Wound die with a natural six. */
+  spendAspectShrineToken(): CommandResult {
+    return this.flowCommand(s => {
+      const job = s.attackJob, window = s.flow?.window;
+      if (!job || !window || !['AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL'].includes(window.trigger) || window.unitId !== job.attackerUnitId) return failure('WRONG_TIMING');
+      const u = s.units.find(u => u.id === job.attackerUnitId), model = u?.models.find(m => m.id === job.current?.modelId);
+      if (!u || !model || !model.alive || modelKeywords(s, u, model).includes('CHARACTER') || !u.resourceCounters?.ASPECT_SHRINE) return failure('UNIT_NOT_ELIGIBLE');
+      const hit = window.trigger === 'AFTER_HIT_ROLL', die = hit ? job.current?.hit : job.current?.wound;
+      if (!die) return failure('INVALID_CONFIGURATION');
+      if (job.current!.modifiers.some(m => m.source === `ASPECT_SHRINE:${window.trigger}`)) return failure('USAGE_LIMIT');
+      die.value = 6;
+      job.current!.modifiers.push({ source: `ASPECT_SHRINE:${window.trigger}`, target: 'DIE', amount: 6, timing: window.trigger });
+      if (hit) job.resolution.hitRolls[job.resolution.hitRolls.length - 1] = 6;
+      else job.resolution.woundRolls[job.resolution.woundRolls.length - 1] = 6;
+      u.resourceCounters.ASPECT_SHRINE--;
+      return { ok: true, value: undefined };
+    });
   }
   resumeAttack(rng: RandomSource): CommandResult<WeaponResolution> {
     const block = temporalBlock(this.state); if (block) return block;
@@ -303,7 +361,8 @@ export class GameEngine {
       for (const m of resolution.attackModifiers ?? []) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(attackerUnitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId: job.target.id, effectiveSkill: m.effectiveSkill });
       for (const damage of resolution.damageResults) this.event(attackerUnitId, { type: 'model-damaged', targetUnitId: job.target.id, weaponId: weapon.id, damage });
       for (const modelId of resolution.destroyedModelIds) this.event(attackerUnitId, { type: 'model-destroyed', targetUnitId: job.target.id, weaponId: weapon.id, modelId });
-    } else this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution });
+    } else { if(this.state.closeCombat?.fight?.selected) delete this.state.closeCombat.fight.selected.selectedTarget;
+      this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution }); }
     queueDestructions(before, this.state, attackerUnitId);
     processAttachmentCasualties(this.state, attackerUnitId);
     detectDestroyedTransports(this.state); normalizeDestroyed(this.state); recordTerrainChanges(before, this.state);
@@ -318,6 +377,7 @@ export class GameEngine {
       if (!legal.ok) return legal;
       const target = s.units.find(u => u.id === targetUnitId)!;
       s.shooting.selectedTarget = { weaponId, targetUnitId, modelCount: target.models.filter(m => m.alive).length, distances: Object.fromEntries(s.units.find(u => u.id === s.shooting!.unitId)!.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => [m.id, Math.min(...target.models.filter(m => m.alive).map(t => edgeDistance(m, t)))])) };
+      recordFactionTarget(s,'attackedByPhase',s.shooting.unitId,[targetUnitId]);
       openWindow(s, 'AFTER_TARGET_SELECTED', { unitId: s.shooting.unitId, targetUnitId });
       return { ok: true, value: undefined };
     });
@@ -428,9 +488,28 @@ export class GameEngine {
   startFightPhase() { return this.combatCommand(c => c.startFightPhase()); }
   advanceFightStep() { return this.combatCommand(c => c.advanceFightStep()); }
   beginPileIn(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginPileIn(id, targets)); }
-  beginConsolidation(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginConsolidation(id, targets)); }
+  beginConsolidation(id: string, targets: string[] = []):CommandResult {
+    const fight=this.state.closeCombat?.fight;
+    if(this.state.flow && this.state.stratagemDefinitions?.some(d=>d.id==='INCESSANT_VIOLENCE') && fight?.step==='CONSOLIDATE' &&
+      !fight.consolidationWindowsOffered?.includes(id) && new CloseCombatController(this.getState()).consolidateUnits().some(u=>u.id===id)) {
+      return this.flowCommand(s=>{const f=s.closeCombat!.fight!; (f.consolidationWindowsOffered ??=[]).push(id);openWindow(s,'BEFORE_CONSOLIDATE',{unitId:id});return {ok:true,value:undefined};});
+    }
+    return this.combatCommand(c => c.beginConsolidation(id, targets));
+  }
   skipTacticalMove(id: string) { return this.combatCommand(c => c.skipTacticalMove(id)); }
   selectFightUnit(id: string) { return this.combatCommand(c => c.selectFightUnit(id)); }
+  selectMeleeTarget(weaponId:string,targetUnitId:string) {
+    return this.flowCommand(s=>{
+      const blocker=temporalBlock(s); if(blocker) return blocker;
+      const result=new CloseCombatController(s).selectMeleeTarget(weaponId,targetUnitId);
+      if(result.ok) openWindow(s,'AFTER_TARGET_SELECTED',{unitId:s.closeCombat!.fight!.selected!.unitId,targetUnitId});
+      return result;
+    });
+  }
+  chooseExquisiteSwordsmanship(choice: 'LETHAL_HITS' | 'SUSTAINED_HITS') { return this.combatCommand(c => c.chooseExquisiteSwordsmanship(choice)); }
+  resolveFightOnDeath(defenderUnitId:string,weaponId:string,rng:RandomSource) {
+    return this.combatCommand(c=>c.resolveFightOnDeath(defenderUnitId,weaponId,rng,this.policies.damageAllocation));
+  }
   beginOverrun(targets: string[]) { return this.combatCommand(c => c.beginOverrun(targets)); }
   meleeAttack(weaponId: string, targetId: string, rng: RandomSource, precisionModelId?: string) {
     const id = this.state.closeCombat?.fight?.selected?.unitId;
@@ -598,7 +677,7 @@ export class GameEngine {
   resolveCommandAbility(id: string) { return this.flowCommand(s => new CommandController(s, this.policies.flow).resolve(id)); }
   passTimingWindow(playerId: string) { return this.flowCommand(s => passWindow(s, playerId)); }
   getStratagemOptions(playerId: string) { return copy(new StratagemEngine(this.getState(), this.policies.stratagems).options(playerId)); }
-  useStratagem(id: string, playerId: string, targets: string[]) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets)); }
+  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng)); }
   gainCommandPoints(playerId: string, amount: number, policy: { ignoreLimit?: boolean; limit?: number } = {}) { return this.flowCommand(s => gainCommandPoints(s, playerId, amount, 'OTHER_CP_GAIN', policy)); }
   canSpendCommandPoints(playerId: string, amount: number) { return canSpendCommandPoints(this.state, playerId, amount); }
   spendCommandPoints(playerId: string, amount: number) { return this.flowCommand(s => spendCommandPoints(s, playerId, amount)); }

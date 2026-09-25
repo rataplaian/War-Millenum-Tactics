@@ -6,13 +6,14 @@ import { woundTarget } from '../rules/combatRolls';
 import { attackToughness, modelDefinition, unitKeywords } from '../attachments/queries';
 import { allocationModel } from '../attachments/AllocationGroups';
 import { allocateDamage, type DamageAllocationPolicy } from '../rules/damageAllocation';
-import { effectiveCharacteristic } from '../effects/EffectEngine';
+import { effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
 import type { RandomSource } from '../utils/dice';
 import type { AttackChoices, WeaponAbilityType } from '../abilities/types';
 import { buildAttackContext } from './context';
 import type { AttackJob, AttackRecord, AttackContext } from './types';
 import { isCriticalWound, rollDie, reroll, canReroll, type RollKind, type RerollPermission } from './dice';
 import { resolveSave } from './save';
+import { modelWithinObjective } from '../missions/objectives';
 import { ignoreWounds, resolveMortalWounds } from './damage';
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const ability = (c: AttackContext, t: WeaponAbilityType) => c.abilities.find(a => a.type === t);
@@ -115,12 +116,13 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             else {
                 a.wound = rollDie(6, rng);
                 const needed = woundTarget(characteristic('STRENGTH', w.strength), s ? attackToughness(s, j.target) : j.targetDefinition.stats.toughness);
-                const wants = j.choices.rerolls?.WOUND ?? (ability(c, 'TWIN_LINKED') ? 'FAILED' : 'NONE');
+                const warding = !!(s && effectiveFlag(s,c.attackerUnitId,'OBJECTIVE_WOUND_REROLL') && s.mission?.objectives.some(o=>j.target.models.some(m=>m.alive&&modelWithinObjective(s,m,o))));
+                const wants = j.choices.rerolls?.WOUND ?? (ability(c, 'TWIN_LINKED') || warding ? 'FAILED' : 'NONE');
                 const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
-                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0)));
+                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? 1 : 0)));
                 const failed = a.wound.value === 1 || (!isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6)) && a.wound.value + delta < needed);
-                if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND')) && (wants === 'ALL' || (wants === 'FAILED' && failed)))
-                    a.wound = reroll(a.wound, permission(w, 'WOUND') ?? { kind: 'WOUND', scope: 'DIE', source: 'TWIN_LINKED' }, 'WOUND', rng);
+                if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND') || warding) && (wants === 'ALL' || (wants === 'FAILED' && failed)))
+                    a.wound = reroll(a.wound, permission(w, 'WOUND') ?? { kind: 'WOUND', scope: 'DIE', source: warding ? 'WARDING_SALVOES' : 'TWIN_LINKED' }, 'WOUND', rng);
                 r.woundRolls.push(a.wound.value);
                 j.stage = 'WOUND_RESULT';
                 if (pause?.('AFTER_WOUND_ROLL', j)) {
@@ -138,7 +140,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             if (a.wound) {
                 const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
                 a.criticalWound = isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6));
-                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? mod(a, 'LANCE', 'WOUND', 1) : 0)));
+                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? mod(a, 'LANCE', 'WOUND', 1) : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? mod(a,'SHIELD_NODES','WOUND',1) : 0)));
                 a.woundSucceeded = a.wound.value !== 1 && (a.criticalWound || a.wound.value + delta >= needed);
             }
             if (!a.woundSucceeded) {
@@ -159,7 +161,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             if (!m?.alive)
                 throw Error('Invalid allocation');
             const d = s ? modelDefinition(s, j.target, m) : j.targetDefinition;
-            const save = characteristic('SAVE', d.stats.save, j.target.id, m.id), ap = characteristic('AP', w.armourPenetration);
+            const save = characteristic('SAVE', m.stats?.save ?? d.stats.save, j.target.id, m.id), ap = characteristic('AP', w.armourPenetration - (s && w.kind==='melee' && effectiveFlag(s,c.attackerUnitId,'MELEE_AP_BONUS') ? 1 : 0));
             a.save = resolveSave(save, d.invulnerableSave, ap, rng, !!permission(w, 'SAVE') && j.choices.rerolls?.SAVE === 'FAILED');
             r.saveResults.push(a.save);
             if (a.save.saved) {

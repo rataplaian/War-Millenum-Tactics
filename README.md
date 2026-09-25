@@ -34,7 +34,7 @@ The mobile export checks bundling for Android and iOS; it does not build an APK/
 
 ## Current status: Task 010
 
-Task 011 source audit is in progress on its feature branch. The faction-neutral content registry and roster validator are implemented without adding unverified official datasheets or point values. See [Task 011 source audit](docs/TASK_011_SOURCE_AUDIT.md) for the missing Codex/MFM sources required before the two real presets can be published.
+Task 011 is in progress on its feature branch and PR #11 remains a draft. The faction-neutral registry and roster validator are implemented. The 19 selected 11th-edition catalogue entries now have sourced costs and chosen unit sizes in `src/game/content/verifiedEntries.ts`; these are **muster facts, not yet playable datasheets or validated rosters**. See the [Task 011 source audit](docs/TASK_011_SOURCE_AUDIT.md) for source priority, the Aeldari size correction and the remaining combat/rule integration work.
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 

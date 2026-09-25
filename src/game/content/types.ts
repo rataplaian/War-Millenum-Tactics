@@ -10,6 +10,8 @@ export interface RulesSourceSnapshot {
   munitorumUpdateDate: string;
   rulesUpdateVersion: string;
   notes: string;
+  /** Primary errata and secondary 11e catalogue URLs used for this slice. */
+  references?: readonly string[];
 }
 
 export interface FactionContent {

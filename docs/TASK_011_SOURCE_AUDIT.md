@@ -1,0 +1,15 @@
+# Task 011 source audit — 25 September 2026
+
+Task 011 requires **verified September 2026 rules and points**, and explicitly forbids inventing missing profiles. Its two real presets cannot be declared legal until the source gaps below are resolved. The current branch contains only independent content infrastructure; there are no official roster entries or guessed stats.
+
+| Source | Verified public access | Needed to finish |
+| --- | --- | --- |
+| [11th Core Rules](https://assets.warhammer-community.com/eng_01-06_warhammer40k_new40k_core_rules-was6fbu1ix-hfewhmxyiy.pdf) | Accessible | General battle and transport rules; verify any additional Universal Rules update before extending move types. |
+| [Aeldari Faction Pack, public version 1.0](https://assets.warhammer-community.com/eng_09-06_warhammer40000_faction_pack_aeldari-glkjirbhiw-9udkry7xbr.pdf) | Accessible | Supplement and errata. It updates Farseer Leader compatibility, Wave Serpent transport capacity and selected abilities, but does not provide every selected Codex datasheet, Guardian Battlehost Stratagem or the complete Battle Focus rule. |
+| [Emperor's Children Faction Pack, public version 1.0](https://assets.warhammer-community.com/eng_10-06_warhammer40000_faction_pack_emperor_s_children-fffbpc3gn0-mesp5k6khu.pdf) | Accessible | Supplement and errata. It updates Faultless Opportunist, Flawless Blades attacks, the Infractors/Tormentors power sword and Rhino/Land Raider keywords; it does not include every selected Codex datasheet or the complete Peerless Bladesmen rules. |
+| [Official MFM](https://mfm.warhammer-community.com/en/) | Official downloads page reports update **02/09/2026**; interactive data returned HTTP 403 in this workspace | Current points, enhancements, Leader listings, Detachment Points and Force Disposition for both exact rosters. Older PDFs must not be substituted silently. |
+| Aeldari and Emperor's Children Codex datasheets | Not supplied; official public Faction Packs explicitly supplement the Codex | Complete current profiles, representative legal equipment, army/detachment rules, six Stratagems per detachment, Aspect Shrine/Icon states, attachment restrictions. |
+
+Before publishing the real presets: obtain access to the current official MFM entries and both current Codex profiles/rules (or user-provided extracts from legitimately accessible sources). Compare every entry against the public Faction Pack errata, then record exact edition, pack versions, MFM date and rules update in `RulesSourceSnapshot`. The MFM site is currently inaccessible from this environment; this is a specific access result, not an assertion that the official page is unavailable to other users.
+
+`content/FactionContentRegistry.ts` and `content/validatePresetRoster.ts` are deliberately faction-neutral. Roster validation rejects placeholder definitions, missing costs, incompatible attached units, over-capacity transports, Warlord and enhancement errors. Synthetic tests establish the behavior without presenting technical fixtures as official army data. Task 010's 597 tests remain unchanged.

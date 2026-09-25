@@ -1,3 +1,5 @@
+import type { ReservePolicy } from '../reserves/ReservePolicy';
+import { synchronizeMission } from '../missions/MissionEngine';
 import { pendingCoreChoices } from '../abilities/core';
 import { PHASES, type CommandResult, type GameState } from '../models';
 import { actionBusy, battleStarted, onBattlefield } from '../reserves/location';
@@ -23,7 +25,7 @@ export function enableFlow(s: GameState, rules: Partial<FlowRules> = {}): Comman
   return { ok: true, value: undefined };
 }
 export class MatchFlowController {
-  constructor(private s: GameState, private policies: FlowPolicies = {}) {}
+  constructor(private s: GameState, private policies: FlowPolicies = {}, private reserves?: ReservePolicy) {}
   start() {
     const s = this.s, f = s.flow;
     if (!f || f.started || !battleStarted(s)) return;
@@ -53,12 +55,12 @@ export class MatchFlowController {
     if (!this.canAdvancePhase().allowed) return failure('PHASE_BLOCKED');
     // End windows resolve before expiry/transition. A second command commits the boundary.
     if (f.boundary === 'NONE') { f.boundary = 'PHASE_END'; openWindow(s, 'END_OF_PHASE'); return { ok: true, value: undefined }; }
-    if (f.boundary === 'PHASE_END' && s.phase === 'Fight') { flowEvent(s, 'PHASE_ENDED', { phase: s.phase }); expireEffects(s, 'PHASE_END'); f.boundary = 'TURN_END'; openWindow(s, 'END_OF_TURN'); return { ok: true, value: undefined }; }
-    if (f.boundary !== 'TURN_END') { flowEvent(s, 'PHASE_ENDED', { phase: s.phase }); expireEffects(s, 'PHASE_END'); }
+    if (f.boundary === 'PHASE_END' && s.phase === 'Fight') { flowEvent(s, 'PHASE_ENDED', { phase: s.phase }); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'PHASE_END'); f.boundary = 'TURN_END'; openWindow(s, 'END_OF_TURN'); return { ok: true, value: undefined }; }
+    if (f.boundary !== 'TURN_END') { flowEvent(s, 'PHASE_ENDED', { phase: s.phase }); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'PHASE_END'); }
     if (s.phase === 'Command') expireEffects(s, 'COMMAND_END');
     const endTurn = s.phase === 'Fight', endRound = endTurn && s.activePlayerId !== f.firstPlayerId;
-    if (endTurn) { flowEvent(s, 'TURN_ENDED'); expireEffects(s, 'TURN_END'); }
-    if (endRound) { flowEvent(s, 'BATTLE_ROUND_ENDED'); expireEffects(s, 'ROUND_END'); }
+    if (endTurn) { flowEvent(s, 'TURN_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'TURN_END'); }
+    if (endRound) { flowEvent(s, 'BATTLE_ROUND_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'ROUND_END'); }
     if (endRound && s.round >= f.rules.maximumBattleRounds) { s.status = 'finished'; f.boundary = 'NONE'; return { ok: true, value: undefined }; }
     Object.assign(s, advancePhase(s)); f.phaseIndex++; f.boundary = 'NONE';
     if (endRound) { for (const p of s.players) p.extraCpGainedThisBattleRound = 0; flowEvent(s, 'BATTLE_ROUND_STARTED'); }

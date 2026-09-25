@@ -26,6 +26,7 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   if (state.movement || state.shooting || state.closeCombat?.charge || state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
+  if (state.mission?.activeActions.some(a => a.unitId === unitId && a.startedAt.turn === state.turn)) return failure('CHARGE_INELIGIBLE');
   if ((unit.cannotChargeUntilTurn ?? 0) >= state.turn || effectiveFlag(state, unit.id, 'CANNOT_CHARGE')) return failure('CHARGE_INELIGIBLE');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');

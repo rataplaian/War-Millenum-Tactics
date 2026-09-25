@@ -1,3 +1,4 @@
+import { validateMissionState } from '../missions/validateMissionState';
 import { movementAbilities } from '../abilities/movement';
 import { centreDistance } from '../utils/geometry';
 import { validateAttackState } from '../combat/validateAttackState';
@@ -20,6 +21,7 @@ export function validateState(state: GameState): void {
   if (state.schemaVersion !== 3 || !state.id || !Number.isSafeInteger(state.round) || state.round < 1 ||
       !Number.isSafeInteger(state.turn) || state.turn < 1 || !PHASES.includes(state.phase) ||
       !['in-progress', 'finished'].includes(state.status)) throw new Error('Invalid match state (schema 3 required)');
+  if (state.players.some(p => p.forceDisposition !== undefined && !['TAKE_AND_HOLD','PURGE_THE_FOE','DISRUPTION','RECONNAISSANCE','PRIORITY_ASSETS'].includes(p.forceDisposition))) throw new Error('Invalid Force Disposition');
   if (state.players.length !== 2 || new Set(state.players.map(p => p.id)).size !== 2 ||
       state.players.some(p => !p.id || !p.factionId) || !state.players.some(p => p.id === state.activePlayerId)) throw new Error('Invalid players');
   if (state.round !== Math.floor((state.turn - 1) / 2) + 1 || state.activePlayerId !== state.players[((state.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id) throw new Error('Inconsistent turn');
@@ -80,6 +82,7 @@ export function validateState(state: GameState): void {
     if (restored.some((a, i) => restored.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping movement originals');
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !historicalUnit(state, event.unitId)))) throw new Error('Invalid event sequence');
+  validateMissionState(state);
   validateAttackState(state);
   validateTransportState(state);
   validateFlowState(state);

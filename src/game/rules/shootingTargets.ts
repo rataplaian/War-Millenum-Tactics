@@ -38,7 +38,8 @@ export function validateShooter(state: GameState, unitId: string): CommandResult
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
-  if ((unit.cannotShootUntilTurn ?? 0) >= state.turn || unit.state.hasFallenBack || effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
+  if ((state.mission?.activeActions.some(a => a.unitId === unit.id && a.startedAt.turn === state.turn) && !unitKeywords(state, unit).includes('TITANIC')) ||
+      (unit.cannotShootUntilTurn ?? 0) >= state.turn || unit.state.hasFallenBack || effectiveFlag(state, unit.id, 'CANNOT_SHOOT')) return failure('UNIT_NOT_ELIGIBLE');
   if (unit.state.hasShot) return failure('ALREADY_SHOT');
   if (!unit.models.some(m => m.alive)) return failure('NO_LIVING_MODELS');
   if (!normalShootingAllowed(state, unit) || (unit.state.hasAdvanced && isUnitEngaged(state, unit))) return failure('UNIT_ENGAGED');

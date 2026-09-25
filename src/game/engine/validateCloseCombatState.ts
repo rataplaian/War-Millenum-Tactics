@@ -4,6 +4,7 @@ import { historicalUnit } from '../attachments/queries';
 import type { GameState } from '../models';
 import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
 import { COMBAT_RULES } from '../rules/closeCombat';
+import { effectiveFlag } from '../effects/EffectEngine';
 /** Task 003 snapshots without this optional extension remain loadable. */
 export function validateCloseCombatState(state: GameState): void {
   const combat = state.closeCombat;
@@ -12,11 +13,13 @@ export function validateCloseCombatState(state: GameState): void {
   const unit = (id: string) => historicalUnit(state, id);
   const ids = (values: string[]) => Array.isArray(values) && new Set(values).size === values.length && values.every(id => !!unit(id));
   require(ids(combat.declared), 'declared units');
+  if (combat.reaction) require(['Movement','Charge'].includes(state.phase) && combat.charge?.unitId===combat.reaction.unitId && unit(combat.reaction.unitId)?.playerId!==state.activePlayerId &&
+    (combat.reaction.source==='CUT_DOWN_THE_WEAK' ? state.phase==='Movement' && !!combat.reaction.targetUnitId && unit(combat.reaction.targetUnitId)?.playerId===state.activePlayerId : combat.reaction.source==='HEROIC_INTERVENTION' && state.phase==='Charge' && ['LEAP_TO_DEFEND','INTO_THE_FRAY'].includes(combat.reaction.mode ?? '')), 'reaction charge');
   for (const effect of combat.effects) require(unit(effect.unitId) && effect.kind === 'FIGHTS_FIRST' && effect.expiresAt === 'END_OF_TURN' && effect.turn === state.turn, 'effect');
   if (combat.charge) {
     const charge = combat.charge, source = unit(charge.unitId);
-    require(state.status === 'in-progress' && state.phase === 'Charge' && source?.playerId === state.activePlayerId && combat.declared.includes(charge.unitId), 'charge owner/phase');
-    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === charge.rolls.reduce((a, b) => a + b, 0), 'charge roll');
+    require(state.status === 'in-progress' && (combat.reaction ? combat.reaction.unitId===charge.unitId && source?.playerId!==state.activePlayerId : state.phase === 'Charge' && source?.playerId === state.activePlayerId) && combat.declared.includes(charge.unitId), 'charge owner/phase');
+    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === (combat.reaction?.mode==='INTO_THE_FRAY' ? Math.min(6,charge.rolls.reduce((a,b)=>a+b,0)) : charge.rolls.reduce((a, b) => a + b, 0)), 'charge roll');
     require(ids(charge.targetIds) && charge.targetIds.every(id => unit(id)!.playerId !== source!.playerId), 'charge targets');
     require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === charge.distance && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
   }
@@ -25,11 +28,13 @@ export function validateCloseCombatState(state: GameState): void {
     require(state.phase === 'Fight' && !combat.charge && ['START', 'PILE_IN', 'FIGHT', 'CONSOLIDATE', 'END'].includes(fight.step), 'fight phase');
     require(['FIGHTS_FIRST', 'REMAINING_COMBATS'].includes(fight.category) && state.players.some(p => p.id === fight.nextPlayerId), 'fight selector');
     for (const list of [fight.pileInDone, fight.eligibleAtFightStart, fight.engagedAtFightStart, fight.fought, fight.consolidateDone]) require(ids(list), 'fight unit references');
+    if (fight.consolidationWindowsOffered) require(ids(fight.consolidationWindowsOffered), 'consolidation windows');
     if (fight.selected) {
       const selected = fight.selected, source = unit(selected.unitId);
       require(fight.step === 'FIGHT' && source && !fight.fought.includes(selected.unitId), 'selected fighter');
       require(new Set(selected.usedModelIds).size === selected.usedModelIds.length && selected.usedModelIds.every(id => source!.models.some(m => m.id === id)), 'used fighters');
       require(typeof selected.hasRolled === 'boolean' && typeof selected.overrunDone === 'boolean', 'selected flags');
+      require(!selected.exquisiteChoice || ['LETHAL_HITS','SUSTAINED_HITS'].includes(selected.exquisiteChoice), 'Exquisite choice');
     }
   }
   const move = combat.move;
@@ -38,7 +43,7 @@ export function validateCloseCombatState(state: GameState): void {
     require(source && !state.movement && !state.shooting, 'exclusive move');
     require(['charge', 'pile-in', 'overrun', 'consolidate'].includes(move.kind), 'move kind');
     require(move.kind === 'charge' ? combat.charge?.unitId === move.unitId : fight && fight.step === (move.kind === 'pile-in' ? 'PILE_IN' : move.kind === 'consolidate' ? 'CONSOLIDATE' : 'FIGHT'), 'move phase');
-    require(move.allowance === (move.kind === 'charge' ? combat.charge?.distance : move.kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileIn), 'move allowance');
+    require(move.allowance === (move.kind === 'charge' ? combat.charge?.distance : effectiveFlag(state,move.unitId,'EXTENDED_TACTICAL_MOVE') || move.kind==='consolidate' && effectiveFlag(state,move.unitId,'EXTENDED_ENGAGING_CONSOLIDATE') ? 6 : move.kind === 'consolidate' ? COMBAT_RULES.consolidate : COMBAT_RULES.pileIn), 'move allowance');
     require(ids(move.targetIds) && move.targetIds.length && move.targetIds.every(id => unit(id)!.playerId !== source!.playerId), 'move targets');
     require(move.originals.length === source!.models.length && new Set(move.originals.map(o => o.modelId)).size === move.originals.length, 'original model set');
     for (const original of move.originals) {

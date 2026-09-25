@@ -32,7 +32,9 @@ npm run export:mobile
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 010
+## Current status: Task 011 in progress
+
+Task 011 is in progress on its existing feature branch and draft PR #11. Its work-in-progress runtime now contains 19 chosen 11th-edition unit definitions, mixed-model loadouts, two deterministic 1,000-point-cap presets, and a Proving Ground match ready for deployment. Battle Focus, Aspect Shrine tokens, Thrill Seekers, Exquisite Swordsmanship, transport permissions and several faction Stratagem interactions use the existing generic controllers. The faction registry still lacks implemented resolvers for many datasheet abilities; the full vertical slice is **not yet validated or ready for review**. See [Task 011 source audit](docs/TASK_011_SOURCE_AUDIT.md) and [architecture](docs/ARCHITECTURE.md).
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 

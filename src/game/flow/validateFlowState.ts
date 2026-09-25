@@ -6,7 +6,7 @@ import { COMMAND_STEPS } from './types';
 import { battleStarted } from '../reserves/location';
 const integer = (v: number, min = 0) => Number.isSafeInteger(v) && v >= min;
 const fail = () => { throw new Error('Invalid match-flow snapshot'); };
-const TRIGGERS = ['START_OF_PHASE', 'END_OF_PHASE', 'START_OF_TURN', 'END_OF_TURN', 'AT_START_OF_COMMAND_PHASE', 'AT_END_OF_COMMAND_PHASE', 'AFTER_TARGET_SELECTED', 'AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL', 'AFTER_UNIT_SHOT', 'AFTER_CHARGE_MOVE', 'AFTER_UNIT_FOUGHT', 'AFTER_BATTLE_SHOCK_FAILED'];
+const TRIGGERS = ['START_OF_PHASE', 'END_OF_PHASE', 'START_OF_TURN', 'END_OF_TURN', 'AT_START_OF_COMMAND_PHASE', 'AT_END_OF_COMMAND_PHASE', 'AFTER_ENEMY_FALL_BACK', 'AFTER_ENEMY_DESTROYED', 'BEFORE_CONSOLIDATE', 'AFTER_TARGET_SELECTED', 'AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL', 'AFTER_UNIT_SHOT', 'AFTER_CHARGE_MOVE', 'AFTER_UNIT_FOUGHT', 'AFTER_BATTLE_SHOCK_FAILED'];
 export function validateFlowState(s: GameState) {
   for (const p of s.players) if ((p.commandPoints !== undefined && !integer(p.commandPoints)) || (p.extraCpGainedThisBattleRound !== undefined && !integer(p.extraCpGainedThisBattleRound))) fail();
   for (const u of s.units) {

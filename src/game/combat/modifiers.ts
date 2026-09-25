@@ -2,8 +2,9 @@ import { modelKeywords } from '../attachments/queries';
 import { isCriticalHit } from './dice';
 import type { GameState } from '../models';
 import type { Characteristic } from '../effects/types';
-import { activeEffects, effectiveCharacteristic } from '../effects/EffectEngine';
+import { activeEffects, effectiveCharacteristic, effectiveFlag } from '../effects/EffectEngine';
 import { sourceModifier } from '../attachments/queries';
+import { modelWithinObjective } from '../missions/objectives';
 import type { AttackRecord, AttackContext } from './types';
 export type ModifierRecord = AttackRecord['modifiers'][number];
 export function characteristicModifiers(s: GameState | undefined, unitId: string, modelId: string, key: Characteristic, timing: string): ModifierRecord[] {
@@ -45,6 +46,11 @@ export function hitOutcome(s: GameState | undefined, c: AttackContext, choices: 
         add('HEAVY', 1);
     if (c.engaged && s && owner && bearer && modelKeywords(s, owner, bearer).some(k => k === 'MONSTER' || k === 'VEHICLE') && !(has('CLOSE_QUARTERS') && c.engagedWithTarget))
         add('CLOSE_QUARTERS_SHOOTING', -1);
+    if (s && effectiveFlag(s, c.targetUnitId, 'DEFENDER_HIT_PENALTY')) add('DEFT_PARRY', -1);
+    if (s?.factionRuleIds?.[owner?.playerId??'']?.includes('GUARDIAN_BATTLEHOST') && owner && bearer &&
+        modelKeywords(s,owner,bearer).some(k=>['DIRE_AVENGERS','GUARDIANS','SUPPORT_WEAPON','WAR_WALKERS'].includes(k)) &&
+        s.mission?.objectives.some(o=>modelWithinObjective(s,bearer,o) || s.units.find(u=>u.id===c.targetUnitId)?.models.some(t=>t.alive&&modelWithinObjective(s,t,o))))
+        add('DEFEND_AT_ALL_COSTS',1);
     const applied = modifiers.filter(m => psychic === 'NONE' || (psychic === 'PENALTIES' && m.amount > 0));
     record.modifiers.push(...applied);
     const delta = Math.max(-1, Math.min(1, applied.reduce((n, m) => n + m.amount, 0)));

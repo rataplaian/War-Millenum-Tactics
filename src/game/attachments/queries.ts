@@ -10,7 +10,7 @@ export function unitKeywords(s: GameState, u: Unit): string[] {
 export function attackToughness(s: GameState, u: Unit): number {
   const record = attachmentFor(s, u.id), bodyguard = record?.components.find(c => c.role === 'BODYGUARD');
   const living = u.models.filter(m => m.alive), bodyguards = living.filter(m => m.componentUnitId === bodyguard?.original.id);
-  return Math.max(...(bodyguards.length ? bodyguards : living).map(m => m.toughness ?? modelDefinition(s, u, m).stats.toughness));
+  return Math.max(...(bodyguards.length ? bodyguards : living).map(m => m.toughness ?? m.stats?.toughness ?? modelDefinition(s, u, m).stats.toughness));
 }
 export function sourceAbilities(s: GameState, u: Unit): { sourceUnitId: string; modelIds: string[]; ability: Ability }[] {
   const record = attachmentFor(s, u.id);
@@ -41,5 +41,6 @@ export function sourceFlag(s: GameState, unitId: string, flag: string): boolean 
 }
 export const historicalUnit = (s: GameState, id: string): Unit | undefined => s.units.find(u => u.id === id) ?? s.attachments?.flatMap(a => [...a.components.map(c => c.original), ...(a.archivedRuntime ? [a.archivedRuntime] : [])]).find(u => u.id === id);
 export function modelHasWeapon(s: GameState, u: Unit, m: Model, weaponId: string) {
-  return modelDefinition(s, u, m).weapons.some(w => weaponId === (m.componentUnitId && attachmentFor(s, u.id) ? `${m.componentUnitId}:${w.id}` : w.id));
+  return modelDefinition(s, u, m).weapons.some(w => (!m.weaponIds || m.weaponIds.includes(w.id)) &&
+    weaponId === (m.componentUnitId && attachmentFor(s, u.id) ? `${m.componentUnitId}:${w.id}` : w.id));
 }

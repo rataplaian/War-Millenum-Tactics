@@ -1,6 +1,7 @@
 import { movementAbilities } from '../abilities/movement';
 import { unitHasCore } from '../abilities/registry';
 import { effectiveFlag } from '../effects/EffectEngine';
+import { canChargeAfterMove, thrillTargetLegal } from '../content/factionRules';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
 import type { CloseCombatState, CommandResult, GameState, Model, Position, Unit } from '../models';
@@ -22,18 +23,19 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   if (!battleStarted(state)) return failure('PRE_BATTLE');
   if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
-  if (state.phase !== 'Charge') return failure('WRONG_PHASE');
+  const reaction=state.closeCombat?.reaction?.unitId===unitId && (state.phase==='Movement' || state.phase==='Charge');
+  if (state.phase !== 'Charge' && !reaction) return failure('WRONG_PHASE');
   if (state.movement || state.shooting || state.closeCombat?.charge || state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
   const unit = state.units.find(u => u.id === unitId);
   if (!unit) return failure('UNIT_NOT_FOUND');
   if (state.mission?.activeActions.some(a => a.unitId === unitId && a.startedAt.turn === state.turn)) return failure('CHARGE_INELIGIBLE');
-  if ((unit.cannotChargeUntilTurn ?? 0) >= state.turn || effectiveFlag(state, unit.id, 'CANNOT_CHARGE')) return failure('CHARGE_INELIGIBLE');
+  if (((unit.cannotChargeUntilTurn ?? 0) >= state.turn && !canChargeAfterMove(state,unit)) || effectiveFlag(state, unit.id, 'CANNOT_CHARGE')) return failure('CHARGE_INELIGIBLE');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
-  if (unit.playerId !== state.activePlayerId) return failure('NOT_YOUR_UNIT');
+  if (unit.playerId === state.activePlayerId ? !!reaction : !reaction) return failure('NOT_YOUR_UNIT');
   if (!living(unit).length) return failure('NO_LIVING_MODELS');
   if (state.closeCombat?.declared.includes(unitId)) return failure('ALREADY_DECLARED');
-  if ((unit.state.hasAdvanced && !exceptions.afterAdvance) || (unit.state.hasFallenBack && !exceptions.afterFallBack) ||
+  if ((unit.state.hasAdvanced && !exceptions.afterAdvance && !canChargeAfterMove(state,unit)) || (unit.state.hasFallenBack && !exceptions.afterFallBack && !canChargeAfterMove(state,unit)) ||
       (isUnitEngaged(state, unit) && !exceptions.whileEngaged)) return failure('CHARGE_INELIGIBLE');
   return { ok: true, value: unit };
 }
@@ -85,7 +87,7 @@ export function reachablePositions(state: GameState, unit: Unit, model: Model, o
 /** Return targets belonging to at least one witnessed legal target combination. */
 export function getLegalChargeTargets(state: GameState, unit: Unit, roll: number): Unit[] {
   if (!Number.isInteger(roll) || roll < 2 || roll > 12) return [];
-  const candidates = enemies(state, unit).filter(target => unitDistance(unit, target) <= Math.min(COMBAT_RULES.chargeTargetDistance, roll) + EPSILON);
+  const candidates = enemies(state, unit).filter(target => thrillTargetLegal(state,unit,target.id) && unitDistance(unit, target) <= Math.min(COMBAT_RULES.chargeTargetDistance, roll) + EPSILON);
   const legal = new Set<string>();
   let attempts = 0;
   const visit = (index: number, ids: string[]) => {

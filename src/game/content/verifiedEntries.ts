@@ -66,3 +66,32 @@ export function verifiedMusterPoints(factionId: VerifiedMusterEntry['factionId']
   return VERIFIED_MUSTER_ENTRIES.filter(entry => entry.factionId === factionId)
     .reduce((total, entry) => total + entry.points, 0);
 }
+
+/** Proposed IDs and manifests. They become PresetRosters only when all definitions/resolvers exist. */
+export interface VerifiedMusterPlan {
+  readonly factionId: VerifiedMusterEntry['factionId'];
+  readonly detachment: string;
+  readonly forceDisposition: 'TAKE_AND_HOLD' | 'PRIORITY_ASSETS';
+  readonly detachmentPoints: 2;
+  readonly warlordId: string;
+  readonly enhancement?: keyof typeof VERIFIED_ENHANCEMENTS;
+  readonly attachments: readonly { id: string; bodyguardId: string; leaderIds: readonly string[]; supportIds?: readonly string[] }[];
+  readonly embarked: readonly { transportId: string; passengerIds: readonly string[] }[];
+}
+
+export const VERIFIED_MUSTER_PLANS: readonly VerifiedMusterPlan[] = [
+  { factionId: 'AELDARI', detachment: 'GUARDIAN_BATTLEHOST', forceDisposition: 'TAKE_AND_HOLD', detachmentPoints: 2,
+    warlordId: 'farseer', attachments: [
+      { id: 'storm-council', bodyguardId: 'storm-guardians', leaderIds: ['farseer'], supportIds: ['warlock'] },
+      { id: 'avenger-command', bodyguardId: 'dire-avengers', leaderIds: ['autarch'] },
+    ], embarked: [{ transportId: 'wave-serpent', passengerIds: ['fire-dragons', 'rangers'] }] },
+  { factionId: 'EMPERORS_CHILDREN', detachment: 'PEERLESS_BLADESMEN', forceDisposition: 'PRIORITY_ASSETS', detachmentPoints: 2,
+    warlordId: 'lord-exultant', enhancement: 'FAULTLESS_OPPORTUNIST', attachments: [
+      { id: 'infractor-command', bodyguardId: 'infractors', leaderIds: ['lord-exultant'] },
+      { id: 'tormentor-command', bodyguardId: 'tormentors', leaderIds: ['sorcerer'] },
+      { id: 'noise-command', bodyguardId: 'noise-marines', leaderIds: ['lord-kakophonist'] },
+    ], embarked: [
+      { transportId: 'chaos-rhino', passengerIds: ['infractor-command'] },
+      { transportId: 'chaos-land-raider', passengerIds: ['tormentor-command', 'flawless-blades'] },
+    ] },
+];

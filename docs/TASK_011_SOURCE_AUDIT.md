@@ -14,6 +14,8 @@ The chosen Aeldari roster contains Farseer 65, Warlock 45, Autarch 75, 10 Storm 
 
 The chosen Emperor's Children roster contains Lord Exultant 80, Sorcerer 55, Lord Kakophonist 70, **10** Infractors 160, 5 Tormentors 80, 6 Noise Marines 145, 3 Flawless Blades 95, Rhino 70 and Land Raider 220: **975 points**. The 11e [Faultless Opportunist entry](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/chaos---emperor%27s-children/ff3a-6be4-e450-7902/faultless-opportunist) is 15, yielding **990** with it. These are checks on intended sizes, not a declaration that roster attachments, weapons or transports have been validated in a live match.
 
+`VERIFIED_MUSTER_PLANS` records the intended attachments and transport passengers without registering incomplete rosters. The proposed Wave Serpent carries Fire Dragons plus Rangers (10 of 12 spaces); the Rhino carries Lord Exultant with 10 Infractors (11 of 12); the Land Raider carries Sorcerer with Tormentors plus 3 Flawless Blades (12 of 14 spaces after counting each Blade as two). These capacity calculations are structural checks; they do not replace Task 008's runtime legality checks.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

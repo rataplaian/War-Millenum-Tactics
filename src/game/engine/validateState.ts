@@ -24,6 +24,8 @@ export function validateState(state: GameState): void {
   if (state.players.some(p => p.forceDisposition !== undefined && !['TAKE_AND_HOLD','PURGE_THE_FOE','DISRUPTION','RECONNAISSANCE','PRIORITY_ASSETS'].includes(p.forceDisposition))) throw new Error('Invalid Force Disposition');
   if (state.players.length !== 2 || new Set(state.players.map(p => p.id)).size !== 2 ||
       state.players.some(p => !p.id || !p.factionId) || !state.players.some(p => p.id === state.activePlayerId)) throw new Error('Invalid players');
+  if (state.enhancements && Object.entries(state.enhancements).some(([id,enhancement])=>!enhancement || !historicalUnit(state,id) ||
+    !state.definitions.find(d=>d.id===historicalUnit(state,id)?.definitionId)?.keywords.some(k=>k.toUpperCase()==='CHARACTER'))) throw new Error('Invalid enhancement assignment');
   if (state.battleFocus && (!['INCURSION','STRIKE_FORCE','ONSLAUGHT'].includes(state.battleFocus.battleSize) ||
       !Number.isSafeInteger(state.battleFocus.round) || state.battleFocus.round < 0 || state.battleFocus.round > state.round ||
       Object.values(state.battleFocus.tokens).some(n => !Number.isSafeInteger(n) || n < 0) ||

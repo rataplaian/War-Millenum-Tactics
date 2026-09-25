@@ -40,7 +40,8 @@ export class CloseCombatController {
     const legal = canDeclareCharge(this.state, unitId, exceptions);
     if (!legal.ok) return legal;
     if (!validateMovementAbilities(this.state, this.unit(unitId), abilityChoices, true)) return failure('INVALID_ABILITY_CHOICE');
-    const rolls = rollD6s(2, rng), distance = rolls.reduce((a, b) => a + b, 0);
+    const rolls = rollD6s(2, rng), rolled = rolls.reduce((a, b) => a + b, 0);
+    const distance = this.combat.reaction?.mode==='INTO_THE_FRAY' ? Math.min(6,rolled) : rolled;
     this.combat.charge = { unitId, rolls, distance, targetIds: [], abilityChoices };
     this.combat.declared.push(unitId);
     this.emit(unitId, { type: 'charge-declared' });
@@ -54,7 +55,11 @@ export class CloseCombatController {
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     if (!targetIds.length || new Set(targetIds).size !== targetIds.length) return failure('TARGETS_REQUIRED');
     const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => thrillTargetLegal(this.state,this.unit(charge.unitId),target.id) && unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance, charge.distance) + EPSILON);
-    if (targetIds.some(id => !legal.some(u => u.id === id)) || (this.combat.reaction && !targetIds.includes(this.combat.reaction.targetUnitId))) return failure('UNREACHABLE_TARGET');
+    const reaction=this.combat.reaction;
+    if (targetIds.some(id => !legal.some(u => u.id === id)) ||
+        (reaction?.targetUnitId && !targetIds.includes(reaction.targetUnitId)) ||
+        (reaction?.mode==='LEAP_TO_DEFEND' && targetIds.some(id=>!this.unit(id).state.hasCharged)) ||
+        (reaction?.mode==='INTO_THE_FRAY' && targetIds.some(id=>unitDistance(this.unit(charge.unitId),this.unit(id))>6+EPSILON))) return failure('UNREACHABLE_TARGET');
     if (!findChargeFormation(this.state, this.unit(charge.unitId), targetIds, charge.distance)) return failure('UNREACHABLE_TARGET');
     charge.targetIds = [...targetIds];
     recordFactionTarget(this.state,'chargedByPhase',charge.unitId,targetIds);

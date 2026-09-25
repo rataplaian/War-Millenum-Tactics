@@ -15,6 +15,8 @@ export interface StratagemDefinition {
 }
 export interface StratagemPolicies {
   definitions?: readonly StratagemDefinition[];
+  cost?: (s: Readonly<GameState>, definition: StratagemDefinition, playerId: string, targetIds: readonly string[], mode?: string) => number;
+  exemptPhaseUsage?: (s: Readonly<GameState>, definition: StratagemDefinition, playerId: string, targetIds: readonly string[]) => boolean;
   restrictions?: Record<string, (s: Readonly<GameState>, playerId: string, targetIds: readonly string[]) => boolean>;
-  resolvers?: Record<string, (s: GameState, targetIds: readonly string[], definition: StratagemDefinition, rng?: RandomSource) => CommandResult>;
+  resolvers?: Record<string, (s: GameState, targetIds: readonly string[], definition: StratagemDefinition, rng?: RandomSource, mode?: string) => CommandResult>;
 }

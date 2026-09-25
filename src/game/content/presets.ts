@@ -7,6 +7,7 @@ import { VERIFIED_MUSTER_ENTRIES, VERIFIED_MUSTER_PLANS } from './verifiedEntrie
 import { AELDARI_DATASHEETS, EMPERORS_CHILDREN_DATASHEETS } from './factionDatasheets';
 import type { GameState } from '../models';
 import { FACTION_STRATAGEMS } from './factionStratagems';
+import { HEROIC_INTERVENTION } from './coreReactions';
 
 export const AELDARI_PRESET: PresetRoster = {
   id: 'aeldari-guardian-battlehost-1000', factionId: 'AELDARI', battleSize: 'INCURSION', pointsLimit: 1000,
@@ -29,7 +30,8 @@ export function createAeldariVsEmperorsChildrenMatch(seed: number): GameState {
   state.players[1] = { id: 'player-2', name: "Emperor's Children", factionId: 'EMPERORS_CHILDREN', forceDisposition: 'PRIORITY_ASSETS', commandPoints: 0 };
   state.definitions = [...AELDARI_DATASHEETS, ...EMPERORS_CHILDREN_DATASHEETS];
   state.factionRuleIds = { [state.players[0].id]: ['BATTLE_FOCUS','GUARDIAN_BATTLEHOST'], [state.players[1].id]: ['THRILL_SEEKERS','EXQUISITE_SWORDSMANSHIP'] };
-  state.stratagemDefinitions = [...FACTION_STRATAGEMS];
+  state.stratagemDefinitions = [...FACTION_STRATAGEMS,HEROIC_INTERVENTION];
+  state.enhancements=Object.fromEntries([AELDARI_PRESET, EMPERORS_CHILDREN_PRESET].flatMap(r=>r.units.filter(u=>u.enhancementId).map(u=>[u.id,u.enhancementId!] as const)));
   state.battleFocus = { battleSize: 'INCURSION', round: 0, tokens: {}, usedByPhase: {}, manoeuvresByPhase: {} };
   state.units = state.definitions.map((d, i) => ({ ...createUnit(d, d.id, i < AELDARI_DATASHEETS.length ? state.players[0].id : state.players[1].id,
     Array.from({length:d.modelCount}, () => ({x:0,y:0,z:0}))), location: 'RESERVES' as const }));

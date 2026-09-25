@@ -47,7 +47,7 @@ import { getDetectionRange, type DetectionRangePolicy, areasForModel, isModelHid
 import { shootingModifiers } from '../terrain/attackModifiers';
 import { elevation } from '../terrain/geometry';
 import { CloseCombatController } from './CloseCombatController';
-import { getModelsEligibleToFight, getLegalChargeTargets, type ChargeExceptions } from '../rules/closeCombat';
+import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
 import type { CommandResult, GameState, GameEvent, MovementPath, Position, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
@@ -458,7 +458,7 @@ export class GameEngine {
   private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
     if (this.state.attackJob) return failure('ATTACK_PENDING');
     const draft = this.getState();
-    const block = temporalBlock(draft); if (block) return block;
+    const block = temporalBlock(draft); if (block && !(block.reason==='PHASE_BLOCKED' && draft.closeCombat?.reaction && draft.closeCombat.charge)) return block;
     const result = command(new CloseCombatController(draft));
     if (result.ok) {
       queueDestructions(this.state, draft, draft.closeCombat?.fight?.selected?.unitId);
@@ -477,7 +477,13 @@ export class GameEngine {
   getLegalChargeTargets() {
     const charge = this.state.closeCombat?.charge;
     if (!charge || this.state.closeCombat?.move) return [];
-    return copy(getLegalChargeTargets(this.state, this.state.units.find(u => u.id === charge.unitId)!, charge.distance));
+    const source=this.state.units.find(u=>u.id===charge.unitId)!,reaction=this.state.closeCombat?.reaction;
+    const candidates=getLegalChargeTargets(this.state, source, charge.distance);
+    if(reaction?.targetUnitId && !candidates.some(u=>u.id===reaction.targetUnitId)) return [];
+    return copy(candidates.filter(u=>
+      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],charge.distance)) &&
+      (reaction?.mode!=='LEAP_TO_DEFEND' || u.state.hasCharged) &&
+      (reaction?.mode!=='INTO_THE_FRAY' || unitDistance(source,u)<=6+EPSILON)));
   }
   selectChargeTargets(ids: string[]) { return this.combatCommand(c => c.selectChargeTargets(ids)); }
   failCharge() { return this.combatCommand(c => c.failCharge()); }
@@ -677,7 +683,7 @@ export class GameEngine {
   resolveCommandAbility(id: string) { return this.flowCommand(s => new CommandController(s, this.policies.flow).resolve(id)); }
   passTimingWindow(playerId: string) { return this.flowCommand(s => passWindow(s, playerId)); }
   getStratagemOptions(playerId: string) { return copy(new StratagemEngine(this.getState(), this.policies.stratagems).options(playerId)); }
-  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng)); }
+  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng, mode)); }
   gainCommandPoints(playerId: string, amount: number, policy: { ignoreLimit?: boolean; limit?: number } = {}) { return this.flowCommand(s => gainCommandPoints(s, playerId, amount, 'OTHER_CP_GAIN', policy)); }
   canSpendCommandPoints(playerId: string, amount: number) { return canSpendCommandPoints(this.state, playerId, amount); }
   spendCommandPoints(playerId: string, amount: number) { return this.flowCommand(s => spendCommandPoints(s, playerId, amount)); }

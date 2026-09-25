@@ -7,6 +7,8 @@ import { engine, ok, pass } from './flow.helpers';
 import { createCloseCombatTestMatch } from '../src/game/data/closeCombatPrototype';
 import { CloseCombatController } from '../src/game/engine/CloseCombatController';
 import { GameEngine } from '../src/game/engine/GameEngine';
+import { HEROIC_INTERVENTION } from '../src/game/content/coreReactions';
+import { hasFightsFirst } from '../src/game/rules/closeCombat';
 
 function fixture(phase: 'Movement'|'Shooting'|'Fight') {
   const s=createTestMatch();s.phase=phase;
@@ -133,4 +135,47 @@ test('Cost of Victory uses the existing Strategic Reserves state and restores de
   assert.equal(e.getState().players[0]!.commandPoints,1);
   assert.ok(e.getState().events.some(x=>x.type==='flow'&&x.name==='MODELS_RESTORED'));
   assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+function heroicFixture(charged:boolean,cp=0) {
+  const s=createCloseCombatTestMatch();s.phase='Charge';
+  s.definitions=s.definitions.map((d,i)=>i===1?{...d,keywords:[...d.keywords,'CHARACTER','EMPERORS_CHILDREN']}:d);
+  s.units[0]!.state.hasCharged=charged;
+  s.stratagemDefinitions=[HEROIC_INTERVENTION];
+  s.enhancements={'unit-2':'FAULTLESS_OPPORTUNIST'};
+  s.players[1]!.commandPoints=cp;
+  const e=engine(s);pass(e);ok(e.tryNextPhase());
+  assert.equal(e.getState().flow?.window?.trigger,'END_OF_PHASE');
+  return e;
+}
+test('Faultless Opportunist discounts the generic Heroic Intervention and Leap targets only chargers',()=>{
+  const e=heroicFixture(true);
+  ok(e.useStratagem('HEROIC_INTERVENTION','player-2',['unit-2'],()=>.99,'LEAP_TO_DEFEND'));
+  assert.equal(e.getState().players[1]!.commandPoints,0);
+  assert.deepEqual(e.getState().closeCombat?.charge?.rolls,[6,6]);
+  assert.deepEqual(e.getLegalChargeTargets().map(u=>u.id),['unit-1']);
+  pass(e);ok(e.selectChargeTargets(['unit-1']));
+  for(const m of e.getState().units[1]!.models) ok(e.moveCombatModel(m.id,{x:m.position.x,y:6.2}));
+  ok(e.completeCombatMove());
+  assert.equal(hasFightsFirst(e.getState(),e.getState().units[1]!),false);
+  assert.ok(e.getState().events.some(x=>x.type==='flow'&&x.name==='STRATAGEM_USED'&&x.detail.cost===0));
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Heroic Intervention Into the Fray caps a rolled twelve at six and accepts an uncharged enemy',()=>{
+  const e=heroicFixture(false,1);
+  ok(e.useStratagem('HEROIC_INTERVENTION','player-2',['unit-2'],()=>.99,'INTO_THE_FRAY'));
+  assert.deepEqual(e.getState().closeCombat?.charge?.rolls,[6,6]);
+  assert.equal(e.getState().closeCombat?.charge?.distance,6);
+  assert.equal(e.getState().players[1]!.commandPoints,0);
+  assert.deepEqual(e.getLegalChargeTargets().map(u=>u.id),['unit-1']);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Heroic Intervention costs one CP for Leap and two for Into without the enhancement',()=>{
+  for (const [mode,expected] of [['LEAP_TO_DEFEND',1],['INTO_THE_FRAY',2]] as const) {
+    const e=heroicFixture(mode==='LEAP_TO_DEFEND',1);
+    const snapshot=e.getState();delete snapshot.enhancements;e.loadMatch(snapshot);
+    const before=e.getState();
+    const attempted=e.useStratagem('HEROIC_INTERVENTION','player-2',['unit-2'],()=>.99,mode);
+    if(expected===2) { assert.equal(attempted.ok,false);assert.deepEqual(e.getState(),before); }
+    else {ok(attempted);assert.equal(e.getState().players[1]!.commandPoints,0);}
+  }
 });

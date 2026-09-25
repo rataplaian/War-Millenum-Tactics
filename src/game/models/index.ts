@@ -122,6 +122,8 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  /** Roster-owned enhancement IDs keyed by original source unit (survive attachment/split). */
+  enhancements?: Record<string,string>;
   /** Destroyed melee defenders that must strike after their attacker completes its activation. */
   fightOnDeath?: { defenderUnitId: string; attackerUnitId: string; modelIds: string[] }[];
   stratagemDefinitions?: StratagemDefinition[];
@@ -268,7 +270,7 @@ export interface FightPhaseState {
   selected: { selectedTarget?: { weaponId: string; targetUnitId: string }; exquisiteChoice?: 'LETHAL_HITS' | 'SUSTAINED_HITS'; attackChoices?: Record<string, AttackChoices>; hazardousCount?: number; extraWeaponsUsed?: string[]; unitId: string; usedModelIds: string[]; hasRolled: boolean; overrunDone: boolean; previousPlayerId?: string; previousCategory?: 'FIGHTS_FIRST' | 'REMAINING_COMBATS' } | null;
 }
 export interface CloseCombatState {
-  reaction?: { unitId: string; targetUnitId: string };
+  reaction?: { unitId: string; targetUnitId?: string; mode?: 'LEAP_TO_DEFEND' | 'INTO_THE_FRAY'; source: 'CUT_DOWN_THE_WEAK' | 'HEROIC_INTERVENTION' };
   charge: ChargeAction | null;
   move: CombatMove | null;
   declared: string[];

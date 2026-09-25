@@ -5,6 +5,7 @@ import { effectiveFlag } from '../effects/EffectEngine';
 /** The snapshot stores stable rule IDs; rule evaluation lives here rather than in UI or unit-name checks. */
 export const hasFactionRule = (s: GameState, u: Unit, ruleId: string): boolean => s.factionRuleIds?.[u.playerId]?.includes(ruleId) ?? false;
 export const thrillSeekers = (s: GameState, u: Unit): boolean => hasFactionRule(s, u, 'THRILL_SEEKERS');
+export const hasEnhancement = (s: GameState, u: Unit, id: string): boolean => u.models.some(m=>m.alive && s.enhancements?.[m.componentUnitId ?? u.id]===id);
 export const canShootAfterMove = (s: GameState, u: Unit): boolean => !!(u.state.hasAdvanced && effectiveFlag(s,u.id,'AFTER_ADVANCE_SHOOT_CHARGE')) || thrillSeekers(s, u) &&
   !!(u.state.hasAdvanced || u.state.hasFallenBack) && u.lastMove?.turn === s.turn &&
   ['ADVANCE_MOVE','FALL_BACK_MOVE'].includes(u.lastMove.kind);

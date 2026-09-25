@@ -47,7 +47,7 @@ export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_S
     CHARGED_NOT_FOUGHT:(s,_p,ids)=>ids.every(id=>living(s,id).state.hasCharged&&!living(s,id).state.hasFought),
     PREVIOUS_CHARGE_KILL:(s,_p,ids)=>ids.every(id=>s.events.some(e=>e.type==='combat-move-completed'&&e.kind==='charge'&&e.unitId===id&&e.turn===s.turn-1)&&s.events.some(e=>e.type==='flow'&&e.name==='UNIT_DESTROYED'&&e.turn===s.turn-1&&e.detail.attackerUnitId===id)),
     CHARGE_REACTION_ELIGIBLE:(s,_p,ids)=>ids.every(id=>{const u=living(s,id),fallen=s.units.find(x=>x.id===s.flow?.window?.unitId);if(!fallen || unitKeywords(s,u).includes('VEHICLE')&&!unitKeywords(s,u).includes('WALKER') || !u.models.some(m=>m.alive&&fallen.models.some(n=>n.alive&&edgeDistance(m,n)<=6+EPSILON)))return false;
-      const draft:GameState=JSON.parse(JSON.stringify(s));draft.closeCombat ??= emptyCloseCombat();draft.closeCombat.reaction={unitId:id,targetUnitId:fallen.id};return canDeclareCharge(draft,id).ok;}),
+      const draft:GameState=JSON.parse(JSON.stringify(s));draft.closeCombat ??= emptyCloseCombat();draft.closeCombat.reaction={unitId:id,targetUnitId:fallen.id,source:'CUT_DOWN_THE_WEAK'};return canDeclareCharge(draft,id).ok;}),
   },
   resolvers:{
     WARDING_SALVOES:(s,ids)=>{effect(s,ids[0]!,'WARDING_SALVOES','OBJECTIVE_WOUND_REROLL');return {ok:true,value:undefined};},
@@ -58,7 +58,7 @@ export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_S
       flowEvent(s,'MODELS_RESTORED',{modelIds:restored},id,u.playerId);return {ok:true,value:undefined};},
     CUT_DOWN_THE_WEAK:(s,ids,_d,rng)=>{if(!rng || !s.flow?.window?.unitId)return failure('INVALID_CONFIGURATION');
       const id=ids[0]!,targetUnitId=s.flow.window.unitId;
-      s.closeCombat ??= emptyCloseCombat();s.closeCombat.reaction={unitId:id,targetUnitId};
+      s.closeCombat ??= emptyCloseCombat();s.closeCombat.reaction={unitId:id,targetUnitId,source:'CUT_DOWN_THE_WEAK'};
       const charge=new CloseCombatController(s).declareCharge(id,rng);
       return charge.ok ? {ok:true,value:undefined} : charge;},
     TERRIFYING_SPECTACLE:(s,ids,_d,rng)=>{if(!rng)return failure('INVALID_CONFIGURATION');const u=living(s,ids[0]!),outcomes=[];

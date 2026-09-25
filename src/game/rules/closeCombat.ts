@@ -23,7 +23,7 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   if (!battleStarted(state)) return failure('PRE_BATTLE');
   if (setupBusy(state)) return failure('SETUP_IN_PROGRESS');
   if (state.status !== 'in-progress') return failure('MATCH_FINISHED');
-  const reaction=state.closeCombat?.reaction?.unitId===unitId && state.phase==='Movement';
+  const reaction=state.closeCombat?.reaction?.unitId===unitId && (state.phase==='Movement' || state.phase==='Charge');
   if (state.phase !== 'Charge' && !reaction) return failure('WRONG_PHASE');
   if (state.movement || state.shooting || state.closeCombat?.charge || state.closeCombat?.move) return failure('COMBAT_IN_PROGRESS');
   const unit = state.units.find(u => u.id === unitId);
@@ -32,7 +32,7 @@ export function canDeclareCharge(state: GameState, unitId: string, exceptions: C
   if (((unit.cannotChargeUntilTurn ?? 0) >= state.turn && !canChargeAfterMove(state,unit)) || effectiveFlag(state, unit.id, 'CANNOT_CHARGE')) return failure('CHARGE_INELIGIBLE');
   if (!onBattlefield(unit)) return failure('NOT_ON_BATTLEFIELD');
   if (arrivalLocked(unit)) return failure('ARRIVAL_MOVE_LOCK');
-  if (unit.playerId === state.activePlayerId ? reaction : !reaction) return failure('NOT_YOUR_UNIT');
+  if (unit.playerId === state.activePlayerId ? !!reaction : !reaction) return failure('NOT_YOUR_UNIT');
   if (!living(unit).length) return failure('NO_LIVING_MODELS');
   if (state.closeCombat?.declared.includes(unitId)) return failure('ALREADY_DECLARED');
   if ((unit.state.hasAdvanced && !exceptions.afterAdvance && !canChargeAfterMove(state,unit)) || (unit.state.hasFallenBack && !exceptions.afterFallBack && !canChargeAfterMove(state,unit)) ||

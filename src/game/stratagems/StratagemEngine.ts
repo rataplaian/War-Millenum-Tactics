@@ -9,12 +9,15 @@ import { TEST_STRATAGEMS } from './testStratagems';
 import type { StratagemDefinition, StratagemPolicies } from './types';
 import type { RandomSource } from '../utils/dice';
 import { FACTION_STRATAGEM_POLICIES } from '../content/factionStratagems';
+import { CORE_REACTION_POLICIES } from '../content/coreReactions';
 export class StratagemEngine {
   constructor(private s: GameState, private policy: StratagemPolicies = {}) {}
-  private get restrictions() { return { ...FACTION_STRATAGEM_POLICIES.restrictions, ...this.policy.restrictions }; }
-  private get resolvers() { return { ...FACTION_STRATAGEM_POLICIES.resolvers, ...this.policy.resolvers }; }
+  private get restrictions() { return { ...CORE_REACTION_POLICIES.restrictions, ...FACTION_STRATAGEM_POLICIES.restrictions, ...this.policy.restrictions }; }
+  private get resolvers() { return { ...CORE_REACTION_POLICIES.resolvers, ...FACTION_STRATAGEM_POLICIES.resolvers, ...this.policy.resolvers }; }
+  private cost(d:StratagemDefinition,playerId:string,targets:readonly string[],mode?:string) {return this.policy.cost?.(this.s,d,playerId,targets,mode) ?? CORE_REACTION_POLICIES.cost?.(this.s,d,playerId,targets,mode) ?? d.cpCost;}
+  private phaseExempt(d:StratagemDefinition,playerId:string,targets:readonly string[]) {return this.policy.exemptPhaseUsage?.(this.s,d,playerId,targets) ?? CORE_REACTION_POLICIES.exemptPhaseUsage?.(this.s,d,playerId,targets) ?? false;}
   definitions() { return this.policy.definitions ?? this.s.stratagemDefinitions ?? TEST_STRATAGEMS; }
-  validate(id: string, playerId: string, targets: readonly string[]): CommandResult<StratagemDefinition> {
+  validate(id: string, playerId: string, targets: readonly string[], mode?:string): CommandResult<StratagemDefinition> {
     const s = this.s, f = s.flow, w = f?.window, d = this.definitions().find(d => d.id === id);
     if (!d) return failure('STRATAGEM_NOT_FOUND');
     if (s.status !== 'in-progress') return failure('MATCH_FINISHED');
@@ -33,27 +36,29 @@ export class StratagemEngine {
         (c === 'ON_BATTLEFIELD' && !onBattlefield(u)) || (c === 'ALIVE' && !u.models.some(m => m.alive)) || (c === 'NOT_SHOT' && u.state.hasShot))) return failure('UNIT_NOT_ELIGIBLE');
     }
     if (d.restrictions?.some(r => !this.restrictions[r]?.(JSON.parse(JSON.stringify(s)), playerId, [...targets]))) return failure('UNIT_NOT_ELIGIBLE');
-    const cp = canSpendCommandPoints(s, playerId, d.cpCost); if (!cp.ok) return cp;
+    const cost=this.cost(d,playerId,targets,mode);if(!Number.isSafeInteger(cost)||cost<0)return failure('INVALID_CONFIGURATION');
+    const cp = canSpendCommandPoints(s, playerId, cost); if (!cp.ok) return cp;
     if (targets.some(id => { const u = s.units.find(u => u.id === id)!; return u.playerId === playerId && u.state.battleShocked && !d.overrides?.allowBattleShockedTarget; })) return failure('BATTLE_SHOCKED');
     const own = f.usage.filter(u => u.playerId === playerId), same = own.filter(u => u.stratagemId === id);
-    if (same.filter(u => u.phaseIndex === f.phaseIndex).length >= (d.usageLimits?.perPhase ?? 1) ||
+    if ((!this.phaseExempt(d,playerId,targets) && same.filter(u => u.phaseIndex === f.phaseIndex && !this.phaseExempt(d,playerId,u.targetIds)).length >= (d.usageLimits?.perPhase ?? 1)) ||
       same.filter(u => u.turn === s.turn).length >= (d.usageLimits?.perTurn ?? Infinity) || same.filter(u=>u.round===s.round).length >= (d.usageLimits?.perBattleRound ?? Infinity) || same.length >= (d.usageLimits?.perBattle ?? Infinity) ||
       (!d.overrides?.allowMultipleOnTarget && own.some(u => u.phaseIndex === f.phaseIndex && u.targetIds.some(t => targets.includes(t))))) return failure('USAGE_LIMIT');
     if (!['APPLY_EFFECT', 'CLEAR_BATTLE_SHOCK'].includes(d.resolverId) && !this.resolvers[d.resolverId]) return failure('MISSING_RESOLVER');
     if (d.resolverId === 'APPLY_EFFECT' && !d.effect) return failure('INVALID_CONFIGURATION');
     return { ok: true, value: d };
   }
-  use(id: string, playerId: string, targets: string[], rng?: RandomSource): CommandResult {
-    const legal = this.validate(id, playerId, targets); if (!legal.ok) return legal;
+  use(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string): CommandResult {
+    const legal = this.validate(id, playerId, targets,mode); if (!legal.ok) return legal;
     const d = legal.value, s = this.s;
     // Caller provides a detached transaction. Resolver failure/throw cannot spend live CP.
-    spendCommandPoints(s, playerId, d.cpCost);
+    const cost=this.cost(d,playerId,targets,mode);
+    spendCommandPoints(s, playerId, cost);
     if (d.resolverId === 'APPLY_EFFECT') for (const unitId of targets) applyEffect(s, { ...d.effect!, target: { unitId } });
     else if (d.resolverId === 'CLEAR_BATTLE_SHOCK') for (const unitId of targets) { s.units.find(u => u.id === unitId)!.state.battleShocked = false; flowEvent(s, 'BATTLE_SHOCK_CLEARED', { source: id }, unitId); }
-    else { const result = this.resolvers[d.resolverId]!(s, targets, d, rng); if (!result.ok) return result; }
+    else { const result = this.resolvers[d.resolverId]!(s, targets, d, rng, mode); if (!result.ok) return result; }
     s.flow!.usage.push({ stratagemId: id, playerId, targetIds: [...targets], phaseIndex: s.flow!.phaseIndex, turn: s.turn, round: s.round });
     s.flow!.window!.passedPlayerIds = [];
-    flowEvent(s, 'STRATAGEM_USED', { stratagemId: id, targetIds: targets, cost: d.cpCost }, '', playerId);
+    flowEvent(s, 'STRATAGEM_USED', { stratagemId: id, targetIds: targets, cost }, '', playerId);
     return { ok: true, value: undefined };
   }
   options(playerId: string) {

@@ -13,12 +13,13 @@ export function validateCloseCombatState(state: GameState): void {
   const unit = (id: string) => historicalUnit(state, id);
   const ids = (values: string[]) => Array.isArray(values) && new Set(values).size === values.length && values.every(id => !!unit(id));
   require(ids(combat.declared), 'declared units');
-  if (combat.reaction) require(state.phase==='Movement' && combat.charge?.unitId===combat.reaction.unitId && unit(combat.reaction.unitId)?.playerId!==state.activePlayerId && unit(combat.reaction.targetUnitId)?.playerId===state.activePlayerId, 'reaction charge');
+  if (combat.reaction) require(['Movement','Charge'].includes(state.phase) && combat.charge?.unitId===combat.reaction.unitId && unit(combat.reaction.unitId)?.playerId!==state.activePlayerId &&
+    (combat.reaction.source==='CUT_DOWN_THE_WEAK' ? state.phase==='Movement' && !!combat.reaction.targetUnitId && unit(combat.reaction.targetUnitId)?.playerId===state.activePlayerId : combat.reaction.source==='HEROIC_INTERVENTION' && state.phase==='Charge' && ['LEAP_TO_DEFEND','INTO_THE_FRAY'].includes(combat.reaction.mode ?? '')), 'reaction charge');
   for (const effect of combat.effects) require(unit(effect.unitId) && effect.kind === 'FIGHTS_FIRST' && effect.expiresAt === 'END_OF_TURN' && effect.turn === state.turn, 'effect');
   if (combat.charge) {
     const charge = combat.charge, source = unit(charge.unitId);
-    require(state.status === 'in-progress' && (combat.reaction ? state.phase==='Movement' && combat.reaction.unitId===charge.unitId && source?.playerId!==state.activePlayerId : state.phase === 'Charge' && source?.playerId === state.activePlayerId) && combat.declared.includes(charge.unitId), 'charge owner/phase');
-    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === charge.rolls.reduce((a, b) => a + b, 0), 'charge roll');
+    require(state.status === 'in-progress' && (combat.reaction ? combat.reaction.unitId===charge.unitId && source?.playerId!==state.activePlayerId : state.phase === 'Charge' && source?.playerId === state.activePlayerId) && combat.declared.includes(charge.unitId), 'charge owner/phase');
+    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === (combat.reaction?.mode==='INTO_THE_FRAY' ? Math.min(6,charge.rolls.reduce((a,b)=>a+b,0)) : charge.rolls.reduce((a, b) => a + b, 0)), 'charge roll');
     require(ids(charge.targetIds) && charge.targetIds.every(id => unit(id)!.playerId !== source!.playerId), 'charge targets');
     require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === charge.distance && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
   }

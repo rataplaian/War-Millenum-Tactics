@@ -1,3 +1,5 @@
+import { MissionPanel } from './MissionPanel';
+import { PROVING_GROUND, createProvingGroundMatch } from '../game/missions/provingGround';
 import { TransportPanel } from './TransportPanel';
 import { createTransportTestMatch } from '../game/data/transportPrototype';
 import { CommandPanel } from './CommandPanel';
@@ -41,7 +43,7 @@ export function GameScreen() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
-  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT' | 'TRANSPORTS'>('DEPLOYMENT');
+  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT' | 'TRANSPORTS' | 'MISSION'>('DEPLOYMENT');
   const [observerId, setObserverId] = useState<string | null>('unit-1:model:1');
   const [targetZ, setTargetZ] = useState(0);
   function report(result: CommandResult<unknown>, success: string) {
@@ -50,10 +52,11 @@ export function GameScreen() {
   }
   function start() {
     setSelectedModelId(null); setTarget(null); setTargetZ(0);
-    engine.current = GameEngine.create(scenario === 'TRANSPORTS' ? createTransportTestMatch() : scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
+    engine.current = GameEngine.create(scenario === 'MISSION' ? createProvingGroundMatch() : scenario === 'TRANSPORTS' ? createTransportTestMatch() : scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
     if (scenario === 'TRANSPORTS') engine.current.configureAttachments([{ id: 'attached', bodyguardId: 'bodyguard', leaderIds: ['leader'], supportIds: ['support'] }]);
-    engine.current.enableMatchFlow();
-    rng.current = createSeededRng(42); // Explicit repeatable debug stream; no platform randomness.
+    rng.current = createSeededRng(42);
+    if (scenario === 'MISSION') engine.current.setupMission(PROVING_GROUND, 'player-1', {}, rng.current);
+    else engine.current.enableMatchFlow(); // Explicit repeatable debug stream; no platform randomness.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
   }
@@ -95,7 +98,7 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['MISSION', 'TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
@@ -103,6 +106,7 @@ export function GameScreen() {
       {state.deployment && <DeploymentPanel state={state} engine={engine.current!} report={report} />}
       {battleStarted(state) && !state.setup && <>
       <CommandPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />
+      <MissionPanel state={state} engine={engine.current!} report={report} />
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
       <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>

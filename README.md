@@ -26,15 +26,27 @@ npm test
 npm run typecheck
 npm run typecheck:engine
 npm run check
-# Optional bundling check, not part of Task 009 validation:
+# Optional bundling check, not part of Task 010 validation:
 npm run export:mobile
 ```
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 009
+## Current status: Task 010
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
+
+### Objectives, Actions and Missions (Task 010)
+
+Choose **MISSION** then **START TEST BATTLE** to load the invented *Proving Ground* scenario. Its five Terrain Objectives use the existing Terrain Area polygons, so terrain visibility, Cover and movement keep working. The debug panel shows objective ownership, secured state, per-model effective OC, P1/P2 points, action eligibility, Fixed selections, Tactical hand/deck and the final winner/draw.
+
+- `setupMission(definition, attackerPlayerId, fixedSelections, rng)` starts a deterministic mission; attacker and first player can differ. `createProvingGroundDeploymentMatch()` uses the existing Task 006 deployment controller when starting from pre-battle.
+- Objectives sum effective OC of living, on-board models, including attached components and temporary modifiers. Battle-shocked or embarked models contribute no OC. Control updates at phase/turn boundaries; secured control is broken by higher opposing OC at the end of a phase.
+- Two invented Actions, **TEST SECURE SITE** and **TEST DATA UPLOAD**, start in Shooting and complete at End of Turn. Committed movement/embark/off-board removal interrupts an Action; Pile In and Consolidation do not. Active Actions block Shooting except for TITANIC and block Charge.
+- Primary and Fixed/Tactical Secondary rules are data-driven, support different rules for each player, score through six timing windows and existing events, and write a capped, attributed VP ledger. Tactical order comes from injected RNG and is stored in the snapshot. After the configured number of rounds the engine calculates winner or draw and applies reserve cleanup.
+- This is a technical mission, not a full official mission deck or Chapter Approved rules implementation. The debug UI is intentionally minimal.
+
+Task 010 validation: **597 tests** (568 unchanged prior tests + 29 new tests), app and isolated-engine TypeScript and diff checks. Android/iOS exports, dependency upgrades and device builds are excluded by this task. CI runs `npm run check`.
 
 ### Universal combat abilities (Task 009)
 
@@ -139,9 +151,9 @@ Visibility samples logical cylinders against extruded polygons and openings; it 
 
 Snapshots remain schema 3: optional terrain, deployment/reserve transactions, locations, core abilities, shooting history and z are additive; missing z means ground level. Older Task 003–005 snapshots remain loadable; omitted location means the legacy battlefield, and omitted deployment state means an already-started battle. Schema 1/2 are rejected. RNG continuation is caller-owned. There is no persistent save, replay executor or hostile-JSON parser.
 
-Generic RESERVES require an explicit arrival policy. Oversized bases that cannot fit an edge constraint are rejected unless a setup policy supplies a fallback; no transport gameplay is implemented. Off-field positions are retained as inert history and never participate in battlefield queries.
+Generic RESERVES require an explicit arrival policy. Oversized bases that cannot fit an edge constraint are rejected unless a setup policy supplies a fallback. Off-field positions are retained as inert history and never participate in battlefield queries.
 
-No complete Actions system, official stratagem catalog, faction rules, complete weapon keyword pack, Feel No Pain, AI, army building, missions, objectives, multiplayer, backend, final art, drag or zoom. Task 008 adds minimal Advance/Fall Back entry points for transport interactions; intermediate miniature crossing remains the existing endpoint-collision approximation. Invulnerable saves are supported in allocation groups. Hit/wound timing identifiers are extension points; individual attack rolls still resolve atomically and do not offer reroll interruptions. Mobile exports check bundling, not real-device behavior or APK/IPA builds.
+The complete official mission card deck, faction rules, AI, army building, multiplayer, backend, final art, drag and zoom remain outside this prototype. Intermediate miniature crossing remains the existing endpoint-collision approximation. Debug mobile export checks bundling, not device behavior or APK/IPA builds.
 
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 

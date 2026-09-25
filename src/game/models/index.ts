@@ -1,3 +1,4 @@
+import type { MissionState, ForceDisposition } from '../missions/types';
 import type { RerollPermission, DieResolution } from '../combat/dice';
 import type { MovementAbilityChoices } from '../abilities/movement';
 import type { WeaponAbilityDefinition, AttackChoices } from '../abilities/types';
@@ -25,7 +26,7 @@ export interface Battlefield { width: number; height: number; losBlockers: LosBl
 export type BattlefieldDimensions = Pick<Battlefield, 'width' | 'height'>;
 /** Extend this discriminated union for hulls later. Radius is derived, never stored. */
 export type BaseGeometry = { kind: 'circle'; diameterMm: number };
-export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number }
+export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number; forceDisposition?: ForceDisposition }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
   oneShotExpended?: string[];
@@ -114,6 +115,7 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  mission?: MissionState;
   combatRules?: { criticalHitThreshold: number; criticalWoundThreshold: number; loneOperativeDistance: number };
   attackJob?: AttackJob;
   destructionQueue?: { model: Model; unitId: string; resolved: boolean; waitForAttackerId?: string }[];
@@ -142,7 +144,7 @@ export interface GameState {
   setup?: SetupTransaction | null;
   scout?: ScoutMoveTransaction | null;
 }
-export type FailureReason = 'ATTACK_PENDING' | 'NO_PENDING_ATTACK' | 'EXTRA_ATTACKS_PENDING' | 'INVALID_ABILITY_CHOICE' | 'INVALID_ATTACHMENT' | 'SUPPORT_REQUIRES_BODYGUARD' | 'NOT_TRANSPORT' | 'INVALID_PASSENGER' | 'TRANSPORT_CAPACITY' | 'TOO_FAR_FROM_TRANSPORT' | 'SET_UP_THIS_TURN' | 'NOT_EMBARKED' | 'DISEMBARK_NOT_ALLOWED' | 'DISEMBARK_IN_PROGRESS' | 'NO_DISEMBARK' | 'PLACEMENT_SEARCH_LIMIT' | 'TACTICAL_MOVE_REQUIRED' | 'FIRING_DECK_LIMIT' | 'ONE_SHOT_FORBIDDEN' | 'PRECISION_TARGET_INVALID' | 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
+export type FailureReason = 'MISSION_NOT_FOUND' | 'MISSION_ALREADY_SET' | 'ACTION_NOT_FOUND' | 'ACTION_INELIGIBLE' | 'OBJECTIVE_NOT_CONTROLLED' | 'ATTACK_PENDING' | 'NO_PENDING_ATTACK' | 'EXTRA_ATTACKS_PENDING' | 'INVALID_ABILITY_CHOICE' | 'INVALID_ATTACHMENT' | 'SUPPORT_REQUIRES_BODYGUARD' | 'NOT_TRANSPORT' | 'INVALID_PASSENGER' | 'TRANSPORT_CAPACITY' | 'TOO_FAR_FROM_TRANSPORT' | 'SET_UP_THIS_TURN' | 'NOT_EMBARKED' | 'DISEMBARK_NOT_ALLOWED' | 'DISEMBARK_IN_PROGRESS' | 'NO_DISEMBARK' | 'PLACEMENT_SEARCH_LIMIT' | 'TACTICAL_MOVE_REQUIRED' | 'FIRING_DECK_LIMIT' | 'ONE_SHOT_FORBIDDEN' | 'PRECISION_TARGET_INVALID' | 'INSUFFICIENT_CP' | 'TIMING_WINDOW_OPEN' | 'NO_TIMING_WINDOW' | 'INVALID_PLAYER' | 'PENDING_RESOLUTION' | 'WRONG_COMMAND_STEP' | 'MISSING_RESOLVER' | 'FLOW_ALREADY_ENABLED' | 'FLOW_REQUIRED' | 'PHASE_BLOCKED' | 'STRATAGEM_NOT_FOUND' | 'WRONG_TIMING' | 'INVALID_TARGET' | 'BATTLE_SHOCKED' | 'USAGE_LIMIT' | 'TARGET_SELECTION_REQUIRED' | 'TARGET_SELECTION_LOCKED' | 'MATCH_FINISHED' | 'WRONG_PHASE' | 'UNIT_NOT_FOUND' | 'NOT_YOUR_UNIT' |
   'ALREADY_MOVED' | 'NO_LIVING_MODELS' | 'MOVEMENT_IN_PROGRESS' | 'NO_ACTIVE_MOVEMENT' |
   'MODEL_NOT_IN_UNIT' | 'MODEL_DEAD' | 'INVALID_POSITION' | 'EXCEEDS_ALLOWANCE' |
   'OUTSIDE_BATTLEFIELD' | 'BASE_OVERLAP' | 'UNIT_ENGAGED' | 'ENEMY_ENGAGEMENT' | 'INCOHERENT' |

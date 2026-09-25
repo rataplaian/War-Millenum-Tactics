@@ -1,3 +1,7 @@
+import { instantiateMission, shuffleTactical, discardTactical, synchronizeMission, awardVictoryPoints, scoreBreakdown, recordDestroyedUnits } from '../missions/MissionEngine';
+import { canStartMissionAction, startMissionAction, interruptActionsOnCommit, eligibleActionObjectives } from '../missions/actions';
+import { calculateLevelOfControl, secureObjective, effectiveModelOC } from '../missions/objectives';
+import type { MissionDefinition, VictoryPointEntry } from '../missions/types';
 import { validateMovementAbilities, type MovementAbilityChoices } from '../abilities/movement';
 import { validAttackChoices } from '../abilities/validation';
 import { edgeDistance } from '../utils/geometry';
@@ -82,12 +86,12 @@ export class GameEngine {
   private progress(transition: (state: GameState) => GameState): CommandResult<GameState> {
     if (this.state.flow) {
       const draft = this.getState(), before = this.getState();
-      const result = new MatchFlowController(draft, this.policies.flow).advance();
+      const result = new MatchFlowController(draft, this.policies.flow, this.policies.reserves).advance();
       if (!result.ok) return result;
       if (draft.round > before.round) resolveReserveExpiration(draft, before.round, this.policies.reserves);
       if (draft.status === 'finished') resolveReserveExpiration(draft, draft.round, this.policies.reserves, true);
       if (draft.phase === 'Charge' || draft.turn > before.turn) for (const u of draft.units) delete u.moveLock;
-      recordTerrainChanges(before, draft); this.state = draft;
+      recordTerrainChanges(before, draft); this.commit(draft);
       return { ok: true, value: this.getState() };
     }
     if (!battleStarted(this.state)) return failure('PRE_BATTLE');
@@ -102,13 +106,17 @@ export class GameEngine {
     const next = transition(this.getState());
     if (next.round > before.round) resolveReserveExpiration(next, before.round, this.policies.reserves);
     if (next.phase === 'Charge' || next.turn > before.turn) for (const u of next.units) delete u.moveLock;
-    this.state = next;
+    this.commit(next);
     recordTerrainChanges(before, this.state);
     return { ok: true, value: this.getState() };
+  }
+  private commit(draft: GameState): void {
+    recordDestroyedUnits(this.state, draft); interruptActionsOnCommit(this.state, draft); synchronizeMission(draft, this.policies.reserves); this.state = draft;
   }
   private event(unitId: string, payload: EventPayload): void {
     this.state.events.push(copy({ ...payload, sequence: this.state.events.length + 1,
       round: this.state.round, turn: this.state.turn, playerId: historicalUnit(this.state, unitId)?.playerId ?? this.state.activePlayerId, unitId } as GameEvent));
+    synchronizeMission(this.state, this.policies.reserves);
   }
   beginMovement(unitId: string, moveType: 'NORMAL_MOVE' | 'ADVANCE_MOVE' | 'FALL_BACK_MOVE' = 'NORMAL_MOVE', rng?: RandomSource, abilityChoices: MovementAbilityChoices = {}): CommandResult {
     const result = validateBeginMovement(this.state, unitId, moveType);
@@ -125,13 +133,13 @@ export class GameEngine {
         queueDestructions(this.state, draft); detectDestroyedTransports(draft); resolveDestructions(draft, rng!);
         if (!unit.models.some(m => m.alive)) {
           unit.state.hasMoved = true; processAttachmentCasualties(draft); normalizeDestroyed(draft);
-          this.state = draft; this.event(unitId, { type: 'movement-started' }); this.event(unitId, { type: 'movement-completed' });
+          this.commit(draft); this.event(unitId, { type: 'movement-started' }); this.event(unitId, { type: 'movement-completed' });
           return { ok: true, value: undefined };
         }
       }
       draft.movement = { unitId, abilityChoices: copy(abilityChoices), moveType, bonus, desperate, irreversible: moveType === 'ADVANCE_MOVE' || desperate, originals: unit.models.map(m => ({ modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
       if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus }, unitId); }
-      this.state = draft; this.event(unitId, { type: 'movement-started' }); return { ok: true, value: undefined };
+      this.commit(draft); this.event(unitId, { type: 'movement-started' }); return { ok: true, value: undefined };
     }
     this.state.movement = { unitId, abilityChoices: copy(abilityChoices), originals: result.value.models.map(m => ({
       modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
@@ -201,7 +209,7 @@ export class GameEngine {
     draft.movement = null;
     draft.events.push({ type: 'movement-completed', unitId: unit.id, playerId: unit.playerId, turn: draft.turn, round: draft.round, sequence: draft.events.length + 1 });
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
-    this.state = draft;
+    this.commit(draft);
     return { ok: true, value: undefined };
   }
   beginShooting(unitId: string, deck: { modelId: string; weaponId: string }[] = []): CommandResult {
@@ -215,7 +223,7 @@ export class GameEngine {
     const draft = this.getState(); draft.shooting = { unitId, firedWeaponIds: [], hasRolled: false };
     if (capacityDefinition(draft, shooter.value)?.firingDeck) { const selected = selectFiringDeck(draft, unitId, deck); if (!selected.ok) return selected; }
     else if (deck.length) return failure('FIRING_DECK_LIMIT');
-    this.state = draft;
+    this.commit(draft);
     this.state.units.find(u => u.id === unitId)!.selectedToShootAt = { turn: this.state.turn, phase: this.state.phase };
     this.event(unitId, { type: 'shooting-started' });
     return { ok: true, value: undefined };
@@ -265,7 +273,7 @@ export class GameEngine {
     const complete = runAttackJob(job, rng, draft, this.rollWindow(draft), this.policies.damageAllocation ?? allocateDamage);
     draft.units = draft.units.map(u => u.id === job.target.id ? job.target : u);
     queueDestructions(before, draft, job.attackerUnitId);
-    this.state = draft;
+    this.commit(draft);
     if (complete) this.commitAttack(job, before);
     return { ok: true, value: copy(job.resolution) };
   }
@@ -281,7 +289,7 @@ export class GameEngine {
     const block = temporalBlock(this.state); if (block) return block;
     if (this.state.attackJob || this.state.transportState?.destroyed.length || this.state.transportState?.disembark) return failure('PENDING_RESOLUTION');
     const before = this.getState(), draft = this.getState();
-    resolveDestructions(draft, rng); recordTerrainChanges(before, draft); this.state = draft;
+    resolveDestructions(draft, rng); recordTerrainChanges(before, draft); this.commit(draft);
     return { ok: true, value: undefined };
   }
   private commitAttack(job: AttackJob, before: GameState) {
@@ -345,7 +353,7 @@ export class GameEngine {
     draft.units = draft.units.map(u => u.id === target.id ? job.target : u);
     if (!complete) { draft.attackJob = job; draft.shooting!.hasRolled = true; }
     queueDestructions(before, draft, job.attackerUnitId);
-    this.state = draft;
+    this.commit(draft);
     if (complete) this.commitAttack(job, before);
     return { ok: true, value: copy(job.resolution) };
   }
@@ -383,7 +391,7 @@ export class GameEngine {
     finishAttacker(draft, unitId); releaseDestructions(draft, unitId);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
-    openWindow(draft, 'AFTER_UNIT_SHOT', { unitId }); this.state = draft;
+    openWindow(draft, 'AFTER_UNIT_SHOT', { unitId }); this.commit(draft);
     return { ok: true, value: undefined };
   }
 
@@ -400,7 +408,7 @@ export class GameEngine {
         if (event.type === 'melee-attack-resolved') processAttachmentCasualties(draft, event.unitId);
         if (event.type === 'fight-unit-completed') openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: event.unitId });
       }
-      detectDestroyedTransports(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
+      detectDestroyedTransports(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.commit(draft); }
     return copy(result);
   }
   declareCharge(unitId: string, rng: RandomSource, choices: MovementAbilityChoices = {}) {
@@ -442,7 +450,7 @@ export class GameEngine {
     queueDestructions(this.state, draft, id); finishAttacker(draft, id); releaseDestructions(draft, id);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft);
-    openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: id }); this.state = draft; return result;
+    openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: id }); this.commit(draft); return result;
   }
 
   private visibility() {
@@ -465,7 +473,7 @@ export class GameEngine {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     const block = temporalBlock(this.state); if (block) return block;
     const draft = this.getState(), result = command(draft);
-    if (result.ok) { new MatchFlowController(draft, this.policies.flow).start(); recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) { new MatchFlowController(draft, this.policies.flow, this.policies.reserves).start(); recordTerrainChanges(this.state, draft); this.commit(draft); }
     return copy(result);
   }
   advancePreBattle() { return this.setupCommand(s => new DeploymentController(s).advance()); }
@@ -505,7 +513,7 @@ export class GameEngine {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     const block = temporalBlock(this.state); if (block && !this.state.transportState?.destroyed.length) return block;
     const draft = this.getState(), result = action(draft);
-    if (result.ok) { queueDestructions(this.state, draft); if (!draft.transportState?.disembark) processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.state = draft; }
+    if (result.ok) { queueDestructions(this.state, draft); if (!draft.transportState?.disembark) processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.commit(draft); }
     return copy(result);
   }
   configureAttachments(assignments: AttachmentAssignment[], policy?: AttachmentPolicy) { return this.passengerCommand(s => formAttachments(s, assignments, policy)); }
@@ -537,16 +545,53 @@ export class GameEngine {
     if (this.state.status !== 'in-progress') return failure('MATCH_FINISHED');
     if (!this.state.flow) return failure('FLOW_REQUIRED');
     const draft = this.getState(), result = command(draft);
-    if (result.ok) { queueDestructions(this.state, draft, draft.attackJob?.attackerUnitId); if (draft.attackJob) draft.attackJob.target = copy(draft.units.find(u => u.id === draft.attackJob!.target.id)!); validateState(draft); this.state = draft; }
+    if (result.ok) { queueDestructions(this.state, draft, draft.attackJob?.attackerUnitId); if (draft.attackJob) draft.attackJob.target = copy(draft.units.find(u => u.id === draft.attackJob!.target.id)!); recordDestroyedUnits(this.state, draft); interruptActionsOnCommit(this.state, draft); synchronizeMission(draft, this.policies.reserves); validateState(draft); this.state = draft; }
     return copy(result);
   }
   /** Explicit migration: legacy snapshots keep their original phase progression until enabled. */
   enableMatchFlow(rules: Partial<FlowRules> = {}): CommandResult {
     const draft = this.getState(), result = enableFlow(draft, rules);
-    if (result.ok) { new MatchFlowController(draft, this.policies.flow).start(); validateState(draft); this.state = draft; }
+    if (result.ok) { new MatchFlowController(draft, this.policies.flow, this.policies.reserves).start(); validateState(draft); this.commit(draft); }
     return result;
   }
-  canAdvancePhase() { return new MatchFlowController(this.getState(), this.policies.flow).canAdvancePhase(); }
+  setupMission(definition: MissionDefinition, attackerPlayerId: string, fixed: Record<string, string[]> = {}, rng?: RandomSource) {
+    if (this.state.mission) return failure('MISSION_ALREADY_SET');
+    const draft = this.getState();
+    if (!draft.flow) { const enabled = enableFlow(draft, { maximumBattleRounds: definition.maximumBattleRounds }); if (!enabled.ok) return enabled; }
+    const result = instantiateMission(draft, definition, attackerPlayerId, fixed);
+    if (!result.ok) return result;
+    if (rng) for (const p of draft.players) if (!fixed[p.id]?.length) { const shuffled = shuffleTactical(draft, p.id, rng); if (!shuffled.ok) return shuffled; }
+    new MatchFlowController(draft, this.policies.flow, this.policies.reserves).start(); this.commit(draft); return result;
+  }
+  getMissionDebug(selectedUnitId?: string) {
+    const s = this.getState(), m = s.mission; if (!m) return null;
+    const unit = s.units.find(u => u.id === selectedUnitId);
+    return copy({ name: m.definition.name, round: s.round, scores: s.players.map(p => scoreBreakdown(s, p.id)),
+      objectives: m.objectives.map(o => ({ id: o.id, owner: o.controllingPlayerId, secured: o.securedByPlayerId,
+        control: s.players.map(p => ({ playerId: p.id, value: calculateLevelOfControl(s, o, p.id) })) })),
+      selectedUnitOC: unit?.models.filter(x => x.alive).map(x => ({ id: x.id, value: effectiveModelOC(s, unit, x) })) ?? [],
+      actions: m.definition.actions.map(a => ({ id: a.id, objectives: unit ? eligibleActionObjectives(s, unit, a).map(o => o.id) : [],
+        eligibility: unit ? canStartMissionAction(s, unit.id, a.id, a.requiresObjective ? eligibleActionObjectives(s, unit, a)[0]?.id : undefined) : null })),
+      activeActions: m.activeActions.filter(a => a.state === 'ACTIVE'), fixed: m.fixed, tactical: m.tactical, result: m.matchResult });
+  }
+  getObjectiveControl(objectiveId: string) {
+    const s = this.getState(), objective = s.mission?.objectives.find(o => o.id === objectiveId);
+    return objective ? copy({ owner: objective.controllingPlayerId, levels: s.players.map(p => ({ playerId: p.id, level: calculateLevelOfControl(s, objective, p.id) })) }) : null;
+  }
+  startAction(unitId: string, actionId: string, objectiveId?: string) { return this.flowCommand(s => startMissionAction(s, unitId, actionId, objectiveId)); }
+  secureObjective(objectiveId: string, playerId: string, source: string) {
+    return this.flowCommand(s => secureObjective(s, objectiveId, playerId, source) ? { ok: true, value: undefined } : failure('OBJECTIVE_NOT_CONTROLLED'));
+  }
+  getTacticalHand(playerId: string) { return copy(this.state.mission?.tactical[playerId]?.hand ?? []); }
+  shuffleTactical(playerId: string, rng: RandomSource) { return this.flowCommand(s => shuffleTactical(s, playerId, rng)); }
+  discardTactical(playerId: string, id: string) { return this.flowCommand(s => discardTactical(s, playerId, id)); }
+  awardMissionPoints(playerId: string, amount: number, sourceType: VictoryPointEntry['sourceType'], sourceId: string) {
+    return this.flowCommand(s => {
+      if (!s.mission || !s.players.some(p => p.id === playerId) || !Number.isSafeInteger(amount) || amount < 0 || !sourceId) return failure('INVALID_CONFIGURATION');
+      return { ok: true, value: awardVictoryPoints(s, playerId, amount, sourceType, sourceId) };
+    });
+  }
+  canAdvancePhase() { return new MatchFlowController(this.getState(), this.policies.flow, this.policies.reserves).canAdvancePhase(); }
   advanceCommandStep() { return this.flowCommand(s => new CommandController(s, this.policies.flow).advance()); }
   rollBattleShock(unitId: string, rng: RandomSource) { return this.flowCommand(s => new CommandController(s, this.policies.flow).roll(unitId, rng)); }
   getCommandAbilities() { return copy(new CommandController(this.getState(), this.policies.flow).options()); }

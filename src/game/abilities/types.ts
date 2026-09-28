@@ -29,7 +29,7 @@ export interface AttackChoices {
     abilities?: Record<string, string>;
     lethalHits?: boolean;
     psychicIgnore?: 'NONE' | 'PENALTIES' | 'ALL';
-    rerolls?: Partial<Record<'HIT' | 'WOUND' | 'SAVE' | 'DAMAGE' | 'ATTACK_COUNT', 'FAILED' | 'ALL' | 'NONE'>>;
+    rerolls?: Partial<Record<'HIT' | 'WOUND' | 'SAVE' | 'DAMAGE' | 'ATTACK_COUNT', 'FAILED' | 'ALL' | 'NONE' | 'ONES'>>;
     shootingMode?: 'NORMAL' | 'INDIRECT';
 }
 export const RULE_IDS: Record<WeaponAbilityType, string> = { ANTI: '24.03', ASSAULT: '24.04', BLAST: '24.05', CLEAVE: '24.06', CLOSE_QUARTERS: '24.07', DEVASTATING_WOUNDS: '24.10', EXTRA_ATTACKS: '24.11', HAZARDOUS: '24.15', HEAVY: '24.16', IGNORES_COVER: '24.18', INDIRECT_FIRE: '24.19/10.07', LANCE: '24.21', LETHAL_HITS: '24.23', MELTA: '24.25', ONE_SHOT: '24.26', PISTOL: '24.27', PRECISION: '24.28', PSYCHIC: '24.29', RAPID_FIRE: '24.30', SUSTAINED_HITS: '24.36', TORRENT: '24.37', TWIN_LINKED: '24.38' };

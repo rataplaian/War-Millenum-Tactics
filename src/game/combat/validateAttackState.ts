@@ -24,8 +24,9 @@ export function validateAttackState(s: GameState) {
             const u = s.units.find(u => u.id === tx.unitId)!;
             const weapons = [...s.definitions.find(d => d.id === u.definitionId)!.weapons, ...(s.shooting?.firingDeck?.map(x => x.borrowed) ?? [])];
             require(Object.entries(tx.attackChoices ?? {}).every(([id, choices]) => { const w = weapons.find(w => w.id === id);
-                const target = tx === s.shooting && s.shooting.selectedTarget?.weaponId === id ? s.units.find(v => v.id === s.shooting!.selectedTarget!.targetUnitId) : undefined;
-                return w && validAttackChoices(tx === s.shooting ? factionAttackWeapon(s,u,w,target) : w, choices); }), 'attack choices');
+                const selection=tx===s.shooting?s.shooting?.selectedTarget:s.closeCombat?.fight?.selected?.selectedTarget;
+                const target=selection?.weaponId===id?s.units.find(v=>v.id===selection.targetUnitId):undefined;
+                return w && validAttackChoices(factionAttackWeapon(s,u,w,target), choices); }), 'attack choices');
         }
     for (const tx of [s.movement, s.closeCombat?.charge])
         if (tx?.abilityChoices)

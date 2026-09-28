@@ -3,6 +3,7 @@ import { hasWeaponAbility, resolvedAbilities, weaponInstanceId } from '../abilit
 import { createAttackJob, runAttackJob, type RollWindow } from '../combat/AttackPipeline';
 import type { AttackJob } from '../combat/types';
 import { modelHasWeapon } from '../attachments/queries';
+import { factionAttackWeapon } from '../content/attackAbilities';
 import { applyEffect, effectiveFlag } from '../effects/EffectEngine';
 import { battleStarted, setupBusy } from '../reserves/location';
 import { validateTerrainPath } from '../terrain/movement';
@@ -292,7 +293,8 @@ export class CloseCombatController {
     if (unit.state.hasCharged && hasFactionRule(this.state,unit,'EXQUISITE_SWORDSMANSHIP') && !selected.exquisiteChoice) return failure('ABILITY_CHOICE_REQUIRED');
     const choices = selected.attackChoices?.[weaponId] ?? {};
     try { resolvedAbilities(this.state, target, weapon, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
-    const job = createAttackJob(weapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, [], this.state, precisionModelId, choices);
+    const attackWeapon=factionAttackWeapon(this.state,unit,weapon,target);
+    const job = createAttackJob(attackWeapon, models.map(m => m.id), target, definitionFor(this.state, target), rng, [], this.state, precisionModelId, choices);
     if (selected.exquisiteChoice) for (const context of job.contexts) context.abilities.push({
       id: `exquisite-swordsmanship:${context.attackerModelId}`, type: selected.exquisiteChoice,
       ...(selected.exquisiteChoice === 'SUSTAINED_HITS' ? { value: 1 } : {}), source: 'EXQUISITE_SWORDSMANSHIP' });

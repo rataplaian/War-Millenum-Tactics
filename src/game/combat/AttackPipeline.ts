@@ -118,11 +118,11 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 a.wound = rollDie(6, rng);
                 const needed = woundTarget(characteristic('STRENGTH', w.strength), s ? attackToughness(s, j.target) : j.targetDefinition.stats.toughness);
                 const warding = !!(s && effectiveFlag(s,c.attackerUnitId,'OBJECTIVE_WOUND_REROLL') && s.mission?.objectives.some(o=>j.target.models.some(m=>m.alive&&modelWithinObjective(s,m,o))));
-                const wants = j.choices.rerolls?.WOUND ?? (ability(c, 'TWIN_LINKED') || warding ? 'FAILED' : 'NONE');
+                const wants = j.choices.rerolls?.WOUND ?? (permission(w,'WOUND')?.source?.startsWith('EXCESSIVE_ASSAULT') ? 'ONES' : ability(c, 'TWIN_LINKED') || warding ? 'FAILED' : 'NONE');
                 const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
                 const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? 1 : 0) - defensiveWoundPenalty(s,j.target,w,characteristic('STRENGTH',w.strength))));
                 const failed = a.wound.value === 1 || (!isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6)) && a.wound.value + delta < needed);
-                if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND') || warding) && (wants === 'ALL' || (wants === 'FAILED' && failed)))
+                if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND') || warding) && (wants === 'ALL' || (wants === 'FAILED' && failed) || (wants === 'ONES' && a.wound.value===1)))
                     a.wound = reroll(a.wound, permission(w, 'WOUND') ?? { kind: 'WOUND', scope: 'DIE', source: warding ? 'WARDING_SALVOES' : 'TWIN_LINKED' }, 'WOUND', rng);
                 r.woundRolls.push(a.wound.value);
                 j.stage = 'WOUND_RESULT';

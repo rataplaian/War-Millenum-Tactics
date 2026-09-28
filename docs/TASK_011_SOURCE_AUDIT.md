@@ -44,6 +44,8 @@ The Chaos Land Raider carries two individually selectable soulshatter lascannons
 
 Stormblades and Objective Defiled now share an end-of-Command resolver that delegates secured objective state and phase-end loss to the mission controller. Attached units preserve the original source; a surviving Character cannot trigger Stormblades after the last Guardian has died. Psychic Communion records the capped number of other nearby on-board Aeldari Psykers when the Warlock's unit is selected to shoot, then applies the frozen bonus only to its Destructor attack view; the catalogue stays unchanged.
 
+Excessive Assault adds a wound reroll permission to Infractors' melee attack views: wound ones are eligible by default, while any result is selectable if the target is in range of an objective. Lord Host grants Scouts 6 and Infiltrators to its bearer within an Emperor's Children Battleline attachment; Task 006 then requires every model in that Attached unit to have the relevant core ability. Neither ability edits the underlying datasheet.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

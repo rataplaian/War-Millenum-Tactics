@@ -19,6 +19,8 @@ import { serpentShieldSave } from '../src/game/content/defensiveAbilities';
 import { secureFactionObjectives } from '../src/game/content/stickyObjectives';
 import { CommandController } from '../src/game/command/CommandController';
 import { psychicCommunionBonus } from '../src/game/content/psychicCommunion';
+import { validAttackChoices } from '../src/game/abilities/validation';
+import { abilitiesFor, allHave, scoutDistance } from '../src/game/deployment/abilities';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -396,6 +398,46 @@ test('Psychic Communion freezes 0–2 other battlefield Aeldari Psykers on selec
     assert.equal(factionAttackWeapon(state,state.units[0]!,warlock.weapons.find(w=>w.id==='shuriken-pistol')!).strength,4);
     assert.deepEqual(new GameEngine(state).getState(),state);
   }
+});
+test('Excessive Assault rerolls wound ones and permits any wound reroll only near an objective',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(12),infractors=s.units.find(u=>u.id==='infractor-command')!,target=s.units.find(u=>u.id==='storm-council')!;
+  infractors.location='BATTLEFIELD';target.location='BATTLEFIELD';
+  const weapon=s.definitions.find(d=>d.id===infractors.definitionId)!.weapons.find(w=>w.id==='infractors:duelling-sabre')!;
+  const definition=s.definitions.find(d=>d.id===target.definitionId)!;
+  const model=infractors.models.find(m=>m.sourceDefinitionId==='infractors')!;
+  const roll=(attack:typeof weapon,first:number,choices:Parameters<typeof createAttackJob>[8]={})=>{
+    const seq=[.5,first,.9,.01];let index=0;
+    const rng=()=>seq[index++]??.5;
+    const job=createAttackJob(attack,[model.id],target,definition,rng,[],s,undefined,choices);
+    runAttackJob(job,rng,s);return job.resolution.attackRecords![0]!;
+  };
+  target.models.forEach(m=>m.position={x:30,y:25});
+  const ordinary=factionAttackWeapon(s,infractors,weapon,target);
+  assert.equal(ordinary.rerollPermissions?.find(p=>p.kind==='WOUND')?.source,'EXCESSIVE_ASSAULT');
+  assert.equal(roll(ordinary,.01).wound?.wasRerolled,true);
+  assert.equal(roll(ordinary,.18).wound?.wasRerolled,false);
+  assert.equal(validAttackChoices(ordinary,{rerolls:{WOUND:'ALL'}}),false);
+  target.models[0]!.position={x:16,y:19};
+  const objective=factionAttackWeapon(s,infractors,weapon,target);
+  assert.equal(validAttackChoices(objective,{rerolls:{WOUND:'ALL'}}),true);
+  assert.equal(roll(objective,.18,{rerolls:{WOUND:'ALL'}}).wound?.wasRerolled,true);
+  assert.equal(weapon.rerollPermissions,undefined);
+});
+test('Lord Host grants only its bearer Scouts and Infiltrators inside a Battleline attachment',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(13),infractors=s.units.find(u=>u.id==='infractor-command')!,lord=infractors.models.find(m=>m.sourceDefinitionId==='lord-exultant')!;
+  assert.equal(abilitiesFor(s,infractors,lord).some(a=>a.kind==='SCOUTS'&&a.distance===6),true);
+  assert.equal(abilitiesFor(s,infractors,lord).some(a=>a.kind==='INFILTRATORS'),true);
+  assert.equal(allHave(s,infractors,'SCOUTS'),true);
+  assert.equal(scoutDistance(s,infractors),6);
+  assert.equal(allHave(s,infractors,'INFILTRATORS'),false);
+  const tormentors=s.units.find(u=>u.id==='tormentor-command')!,record=s.attachments!.find(a=>a.id===tormentors.id)!;
+  record.components.find(c=>c.role==='LEADER')!.original.definitionId='lord-exultant';
+  const original=tormentors.models.find(m=>m.sourceDefinitionId==='sorcerer')!;
+  original.sourceDefinitionId='lord-exultant';original.componentUnitId=record.components.find(c=>c.role==='LEADER')!.original.id;
+  assert.equal(allHave(s,tormentors,'INFILTRATORS'),true);
+  assert.equal(allHave(s,tormentors,'SCOUTS'),false);
+  record.active=false;
+  assert.equal(abilitiesFor(s,tormentors,original).some(a=>a.kind==='SCOUTS'),false);
 });
 test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;

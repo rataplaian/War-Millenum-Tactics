@@ -27,6 +27,8 @@ const implemented = {
   STORMBLADES: 'content.secureFactionObjectives',
   OBJECTIVE_DEFILED: 'content.secureFactionObjectives',
   PSYCHIC_COMMUNION: 'content.psychicCommunionBonus',
+  EXCESSIVE_ASSAULT: 'content.factionAttackWeapon',
+  LORD_HOST: 'deployment.abilitiesFor',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

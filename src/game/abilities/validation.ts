@@ -45,5 +45,6 @@ export function validAttackChoices(w: DeepReadonly<Weapon>, c: AttackChoices) {
     const instances = weaponAbilities(w);
     if (Object.entries(c.abilities ?? {}).some(([kind, id]) => !instances.some(a => a.type === kind && a.id === id)))
         return false;
-    return Object.entries(c.rerolls ?? {}).every(([kind, mode]) => ['ALL', 'FAILED', 'NONE'].includes(mode) && (mode === 'NONE' || (kind === 'WOUND' && hasWeaponAbility(w, 'TWIN_LINKED')) || w.rerollPermissions?.some(p => p.kind === kind)));
+    return Object.entries(c.rerolls ?? {}).every(([kind, mode]) => ['ALL', 'FAILED', 'NONE', 'ONES'].includes(mode) && (mode === 'NONE' || (kind === 'WOUND' && hasWeaponAbility(w, 'TWIN_LINKED')) || w.rerollPermissions?.some(p => p.kind === kind)) &&
+        !(kind==='WOUND' && mode!=='ONES' && mode!=='NONE' && w.rerollPermissions?.find(p=>p.kind==='WOUND')?.source==='EXCESSIVE_ASSAULT'));
 }

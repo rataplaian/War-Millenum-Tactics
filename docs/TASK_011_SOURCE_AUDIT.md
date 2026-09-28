@@ -34,6 +34,8 @@ Sorcerer's Warped Interference now grants Cover to its attached unit through the
 
 Night Spinner's Monofilament Web and Sorcerer's Wracking Agonies now share a post-shot effect hook. A hit with the specified weapon slows an eligible surviving target by 2 inches and reduces its charge roll by 2 until the attacker's next turn; Wracking Agonies requires Infantry. Attack snapshots, movement characteristics, and charge target previews use the same serializable effect data.
 
+Wave Serpent Shield now supplies a ranged-only wound-roll penalty when the attacking Strength exceeds the vehicle's Toughness. The shared combat pipeline resolves the modifier without changing either weapon profile. Wave Serpent, Night Spinner and Chaos Land Raider each use their datasheet Damaged threshold to penalize their own Hit rolls while their bearer is alive. Tests cover threshold boundaries, melee exclusion, and unchanged weapon data.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

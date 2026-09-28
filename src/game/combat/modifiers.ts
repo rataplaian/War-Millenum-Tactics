@@ -1,4 +1,4 @@
-import { modelKeywords } from '../attachments/queries';
+import { modelDefinition, modelKeywords } from '../attachments/queries';
 import { isCriticalHit } from './dice';
 import type { GameState } from '../models';
 import type { Characteristic } from '../effects/types';
@@ -47,6 +47,8 @@ export function hitOutcome(s: GameState | undefined, c: AttackContext, choices: 
     if (c.engaged && s && owner && bearer && modelKeywords(s, owner, bearer).some(k => k === 'MONSTER' || k === 'VEHICLE') && !(has('CLOSE_QUARTERS') && c.engagedWithTarget))
         add('CLOSE_QUARTERS_SHOOTING', -1);
     if (s && effectiveFlag(s, c.targetUnitId, 'DEFENDER_HIT_PENALTY')) add('DEFT_PARRY', -1);
+    if (s && owner && bearer && modelDefinition(s,owner,bearer).abilities.some(a=>a.id.startsWith('DAMAGED_') &&
+        bearer.alive && bearer.woundsRemaining<=(Number(a.parameters.threshold)||0))) add('DAMAGED',-1);
     if (s && owner && bearer && modelKeywords(s,owner,bearer).includes('AELDARI') &&
         activeEffects(s,c.targetUnitId).some(e=>e.source===`GUIDE:${owner.playerId}`)) add('GUIDE',1);
     if (s?.factionRuleIds?.[owner?.playerId??'']?.includes('GUARDIAN_BATTLEHOST') && owner && bearer &&

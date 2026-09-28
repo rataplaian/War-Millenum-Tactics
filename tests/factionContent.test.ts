@@ -227,6 +227,43 @@ test('a missed Doomweaver and a Sorcerer hit on a Vehicle leave movement unaffec
     assert.equal(chargeAllowance(e.getState(),7,[],'unit-2'),7);
   }
 });
+test('Damaged vehicle Hit penalties use each datasheet threshold without changing the weapon profile',()=>{
+  for(const [id,weaponId,threshold] of [['wave-serpent','twin-shuriken-cannon',4],['night-spinner','doomweaver',4],['chaos-land-raider','soulshatter-lascannon',5]] as const){
+    const s=createTestMatch(),definition=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)!;
+    const u=createUnit(definition,'unit-1','player-1',[{x:4,y:4}]);
+    s.units[0]=u;s.definitions=[definition,s.definitions[1]!];s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+    const w=definition.weapons.find(x=>x.id===weaponId)!;
+    const resolution=(remaining:number)=>{
+      u.models[0]!.woundsRemaining=remaining;
+      const job=createAttackJob(w,[u.models[0]!.id],s.units[1]!,s.definitions[1]!,()=>.34,[],s);
+      runAttackJob(job,()=>.34,s);
+      return job.resolution.attackRecords![0]!;
+    };
+    assert.equal(resolution(threshold+1).hitSucceeded,true,id);
+    const damaged=resolution(threshold);
+    assert.equal(damaged.hitSucceeded,false,id);
+    assert.equal(damaged.modifiers.some(m=>m.source==='DAMAGED'&&m.amount===-1),true,id);
+    assert.equal(w.skill,3,id);
+  }
+});
+test('Wave Serpent Shield penalizes strong ranged wounds only, without changing weapons or saves',()=>{
+  const s=createTestMatch(),serpent=AELDARI_DATASHEETS.find(d=>d.id==='wave-serpent')!;
+  const target=createUnit(serpent,'unit-2','player-2',[{x:4,y:10}]);
+  s.definitions=[s.definitions[0]!,serpent];s.units[1]=target;
+  const base=s.definitions[0]!.weapons[0]!;
+  const strong={...base,attacks:{kind:'fixed' as const,value:1},strength:13,armourPenetration:0,damage:{kind:'fixed' as const,value:1}};
+  const resolve=(weapon:typeof strong,roll=.34)=>{
+    const job=createAttackJob(weapon,[s.units[0]!.models[0]!.id],target,serpent,()=>roll,[],s);
+    runAttackJob(job,()=>roll,s);
+    return job.resolution.attackRecords![0]!;
+  };
+  assert.equal(resolve(strong).woundSucceeded,false);
+  assert.equal(resolve(strong).modifiers.some(m=>m.source==='WAVE_SERPENT_SHIELD'&&m.amount===1),true);
+  assert.equal(resolve({...strong,strength:11},.5).woundSucceeded,true);
+  assert.equal(resolve({...strong,kind:'melee',range:null}).woundSucceeded,true);
+  assert.equal(strong.strength,13);
+  assert.equal(base.strength,s.definitions[0]!.weapons[0]!.strength);
+});
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
   const u=createUnit(storm,'storm','p',Array.from({length:11},(_,i)=>({x:i,y:0})));

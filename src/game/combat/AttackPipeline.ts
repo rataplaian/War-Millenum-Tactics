@@ -14,6 +14,7 @@ import type { AttackJob, AttackRecord, AttackContext } from './types';
 import { isCriticalWound, rollDie, reroll, canReroll, type RollKind, type RerollPermission } from './dice';
 import { resolveSave } from './save';
 import { modelWithinObjective } from '../missions/objectives';
+import { defensiveWoundPenalty } from '../content/defensiveAbilities';
 import { ignoreWounds, resolveMortalWounds } from './damage';
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const ability = (c: AttackContext, t: WeaponAbilityType) => c.abilities.find(a => a.type === t);
@@ -119,7 +120,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 const warding = !!(s && effectiveFlag(s,c.attackerUnitId,'OBJECTIVE_WOUND_REROLL') && s.mission?.objectives.some(o=>j.target.models.some(m=>m.alive&&modelWithinObjective(s,m,o))));
                 const wants = j.choices.rerolls?.WOUND ?? (ability(c, 'TWIN_LINKED') || warding ? 'FAILED' : 'NONE');
                 const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
-                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? 1 : 0)));
+                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? 1 : 0) - defensiveWoundPenalty(s,j.target,w,characteristic('STRENGTH',w.strength))));
                 const failed = a.wound.value === 1 || (!isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6)) && a.wound.value + delta < needed);
                 if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND') || warding) && (wants === 'ALL' || (wants === 'FAILED' && failed)))
                     a.wound = reroll(a.wound, permission(w, 'WOUND') ?? { kind: 'WOUND', scope: 'DIE', source: warding ? 'WARDING_SALVOES' : 'TWIN_LINKED' }, 'WOUND', rng);
@@ -140,7 +141,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             if (a.wound) {
                 const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
                 a.criticalWound = isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6));
-                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? mod(a, 'LANCE', 'WOUND', 1) : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? mod(a,'SHIELD_NODES','WOUND',1) : 0)));
+                const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? mod(a, 'LANCE', 'WOUND', 1) : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? mod(a,'SHIELD_NODES','WOUND',1) : 0) - (defensiveWoundPenalty(s,j.target,w,characteristic('STRENGTH',w.strength)) ? mod(a,'WAVE_SERPENT_SHIELD','WOUND',1) : 0)));
                 a.woundSucceeded = a.wound.value !== 1 && (a.criticalWound || a.wound.value + delta >= needed);
             }
             if (!a.woundSucceeded) {

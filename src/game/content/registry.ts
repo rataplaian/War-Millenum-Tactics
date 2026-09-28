@@ -17,6 +17,10 @@ const implemented = {
   WARPED_INTERFERENCE: 'terrain.benefitOfCover',
   WRACKING_AGONIES: 'content.applyShootingOnHitEffects',
   MONOFILAMENT_WEB: 'content.applyShootingOnHitEffects',
+  DAMAGED_WAVE_SERPENT: 'combat.hitOutcome',
+  DAMAGED_NIGHT_SPINNER: 'combat.hitOutcome',
+  DAMAGED_LAND_RAIDER: 'combat.hitOutcome',
+  WAVE_SERPENT_SHIELD: 'content.defensiveWoundPenalty',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

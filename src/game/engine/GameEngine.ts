@@ -79,6 +79,19 @@ export class GameEngine {
   useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource) {
     return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng));
   }
+  activateEuphoricStrikes(unitId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.phase!=='Fight'||s.flow?.window?.trigger!=='START_OF_PHASE'||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!onBattlefield(unit))return failure('UNIT_NOT_ELIGIBLE');
+      const bearer=unit.models.find(m=>m.alive&&modelDefinition(s,unit,m).abilities.some(a=>a.id==='EUPHORIC_STRIKES'));
+      if(!bearer)return failure('UNIT_NOT_ELIGIBLE');
+      if(s.flow.effects.some(e=>e.source==='EUPHORIC_STRIKES'&&e.target.modelId===bearer.id))return failure('USAGE_LIMIT');
+      for(const [characteristic,value] of [['ATTACKS',3],['AP',-1]] as const)
+        applyEffect(s,{source:'EUPHORIC_STRIKES',target:{unitId,modelId:bearer.id},payload:{kind:'MODIFIER',characteristic,value},expiry:'END_OF_CURRENT_PHASE',stacking:'STACK'});
+      return {ok:true,value:undefined};
+    });
+  }
   /** Guide targets a visible enemy at the end of the Aeldari player's Movement phase. */
   useGuide(unitId:string,targetId:string):CommandResult {
     return this.flowCommand(s=>{

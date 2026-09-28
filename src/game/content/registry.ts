@@ -29,6 +29,7 @@ const implemented = {
   PSYCHIC_COMMUNION: 'content.psychicCommunionBonus',
   EXCESSIVE_ASSAULT: 'content.factionAttackWeapon',
   LORD_HOST: 'deployment.abilitiesFor',
+  EUPHORIC_STRIKES: 'GameEngine.activateEuphoricStrikes',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

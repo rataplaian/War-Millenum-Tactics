@@ -10,7 +10,7 @@ export type ModifierRecord = AttackRecord['modifiers'][number];
 export function characteristicModifiers(s: GameState | undefined, unitId: string, modelId: string, key: Characteristic, timing: string): ModifierRecord[] {
     if (!s || !unitId)
         return [];
-    const records = activeEffects(s, unitId).filter(e => e.payload.kind === 'MODIFIER' && e.payload.characteristic === key).map(e => ({ source: e.source, target: key, amount: e.payload.kind === 'MODIFIER' ? e.payload.value : 0, timing, stacking: e.stacking, priority: 0 }));
+    const records = activeEffects(s, unitId,modelId).filter(e => e.payload.kind === 'MODIFIER' && e.payload.characteristic === key).map(e => ({ source: e.source, target: key, amount: e.payload.kind === 'MODIFIER' ? e.payload.value : 0, timing, stacking: e.stacking, priority: 0 }));
     const attached = sourceModifier(s, unitId, key, modelId);
     if (attached)
         records.push({ source: 'ATTACHED_ABILITY', target: key, amount: attached, timing, stacking: 'STACK', priority: 0 });

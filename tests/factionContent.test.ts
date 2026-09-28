@@ -439,6 +439,27 @@ test('Lord Host grants only its bearer Scouts and Infiltrators inside a Battleli
   record.active=false;
   assert.equal(abilitiesFor(s,tormentors,original).some(a=>a.kind==='SCOUTS'),false);
 });
+test('Euphoric Strikes is optional, model scoped, once per battle and expires after Fight',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const raw=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-exultant')!,lord={...raw,attachment:undefined},s=createTestMatch();
+  s.phase='Fight';s.definitions=[lord,s.definitions[1]!];s.players[0]!.factionId=lord.factionId;s.armies[0]!.factionId=lord.factionId;
+  s.units[0]=createUnit(lord,'unit-1','player-1',[{x:4.5,y:4.5}]);
+  const initial=engine(s).getState();
+  initial.flow!.window={id:'window-1',trigger:'START_OF_PHASE',playerId:'player-1',passedPlayerIds:[]};
+  const e=new GameEngine(initial),original=e.getState(),modelId=original.units[0]!.models[0]!.id;
+  assert.equal(effectiveCharacteristic(original,'unit-1','ATTACKS',5,modelId),5);
+  ok(e.activateEuphoricStrikes('unit-1'));
+  const active=e.getState();
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5,modelId),8);
+  assert.equal(effectiveCharacteristic(active,'unit-1','AP',-2,modelId),-3);
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5),5);
+  assert.equal(e.activateEuphoricStrikes('unit-1').ok,false);
+  assert.deepEqual(new GameEngine(active).getState(),active);
+  expireEffects(active,'PHASE_END');
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5,modelId),5);
+  assert.equal(new GameEngine(active).activateEuphoricStrikes('unit-1').ok,false);
+  assert.equal(lord.weapons.find(w=>w.id==='phoenix-power-spear')?.attacks.kind,'fixed');
+});
 test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;
   unit.location='BATTLEFIELD';unit.models.filter(m=>m.componentUnitId==='storm-guardians').forEach(m=>{m.alive=false;m.woundsRemaining=0;});

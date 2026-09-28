@@ -16,6 +16,9 @@ import { validatePresetRoster } from '../src/game/content/validatePresetRoster';
 import { shootingModifiers } from '../src/game/terrain/attackModifiers';
 import { createVisibilityProvider } from '../src/game/terrain/visibility';
 import { serpentShieldSave } from '../src/game/content/defensiveAbilities';
+import { secureFactionObjectives } from '../src/game/content/stickyObjectives';
+import { CommandController } from '../src/game/command/CommandController';
+import { psychicCommunionBonus } from '../src/game/content/psychicCommunion';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -359,6 +362,47 @@ test('Guardian Battlehost objective bonus uses original model keywords on an Att
   const seerJob=createAttackJob(seerWeapon,[seer.id],enemy,targetDefinition,()=>0,[],s);
   runAttackJob(seerJob,()=>0,s);
   assert.equal(seerJob.resolution.attackRecords?.[0]?.modifiers.some(m=>m.source==='DEFEND_AT_ALL_COSTS'),false);
+});
+test('Stormblades and Objective Defiled secure controlled objectives via the shared Command resolver',()=>{
+  for(const [unitId,playerId,source] of [['storm-council','player-1','STORMBLADES'],['tormentor-command','player-2','OBJECTIVE_DEFILED']] as const){
+    const s=createAeldariVsEmperorsChildrenMatch(9),unit=s.units.find(u=>u.id===unitId)!;
+    s.activePlayerId=playerId;unit.location='BATTLEFIELD';
+    unit.models.forEach((m,i)=>m.position={x:3+(i%7)*2,y:3+Math.floor(i/7)*2});unit.models[0]!.position={x:16,y:19};
+    s.phase='Command';s.flow!.commandStep='END_OF_COMMAND_PHASE';s.flow!.missionHookStarted=true;
+    assert.equal(new CommandController(s).advance().ok,true);
+    const objective=s.mission!.objectives.find(o=>o.id==='site-2')!;
+    assert.equal(objective.securedByPlayerId,playerId);
+    assert.equal(objective.securedSource,source);
+    assert.equal(secureFactionObjectives(s).length,0);
+    assert.equal(JSON.parse(JSON.stringify(s)).mission.objectives.find((o:{id:string})=>o.id==='site-2')?.securedByPlayerId,playerId);
+  }
+});
+test('Psychic Communion freezes 0–2 other battlefield Aeldari Psykers on selection and buffs Destructor only',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const warlock={...AELDARI_DATASHEETS.find(d=>d.id==='warlock')!,attachment:undefined},farseer={...AELDARI_DATASHEETS.find(d=>d.id==='farseer')!,attachment:undefined};
+  for(let count=0;count<=3;count++){
+    const s=createTestMatch();s.phase='Shooting';s.definitions=[warlock,s.definitions[1]!,farseer];
+    s.units[0]=createUnit(warlock,'unit-1','player-1',[{x:5,y:5}]);
+    s.players[0]!.factionId=warlock.factionId;s.armies[0]!.factionId=warlock.factionId;
+    for(let i=0;i<count;i++) {const u=createUnit(farseer,`seer-${i}`,'player-1',[{x:6.5+i*1.5,y:5}]);u.location='BATTLEFIELD';s.units.push(u);s.armies[0]!.unitIds.push(u.id);}
+    const distant=createUnit(farseer,'reserve-seer','player-1',[{x:5,y:5}]);distant.location='RESERVES';s.units.push(distant);s.armies[0]!.unitIds.push(distant.id);
+    assert.equal(psychicCommunionBonus(s,s.units[0]!),Math.min(2,count));
+    const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));
+    const state=e.getState(),view=factionAttackWeapon(state,state.units[0]!,warlock.weapons.find(w=>w.id==='destructor')!);
+    assert.equal(state.shooting?.psychicCommunionBonus,Math.min(2,count));
+    assert.equal(view.strength,5+Math.min(2,count));
+    assert.deepEqual(view.attacks,{kind:'dice',count:1,sides:6,modifier:Math.min(2,count)});
+    assert.equal(warlock.weapons.find(w=>w.id==='destructor')?.strength,5);
+    assert.equal(factionAttackWeapon(state,state.units[0]!,warlock.weapons.find(w=>w.id==='shuriken-pistol')!).strength,4);
+    assert.deepEqual(new GameEngine(state).getState(),state);
+  }
+});
+test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;
+  unit.location='BATTLEFIELD';unit.models.filter(m=>m.componentUnitId==='storm-guardians').forEach(m=>{m.alive=false;m.woundsRemaining=0;});
+  unit.models.find(m=>m.sourceDefinitionId==='farseer')!.position={x:16,y:19};
+  assert.deepEqual(secureFactionObjectives(s),[]);
+  assert.equal(s.mission!.objectives.find(o=>o.id==='site-2')?.securedByPlayerId,null);
 });
 test('Incursion rosters total 990 and 1000 including enhancement',()=>{
   assert.equal(AELDARI_PRESET.units.length,10);

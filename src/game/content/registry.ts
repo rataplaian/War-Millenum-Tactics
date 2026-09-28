@@ -24,6 +24,9 @@ const implemented = {
   SERPENT_SHIELD: 'content.serpentShieldSave',
   CREWED_PLATFORM: 'content.removeUncrewedPlatform',
   INESCAPABLE_ACCURACY: 'combat.hitOutcome',
+  STORMBLADES: 'content.secureFactionObjectives',
+  OBJECTIVE_DEFILED: 'content.secureFactionObjectives',
+  PSYCHIC_COMMUNION: 'content.psychicCommunionBonus',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

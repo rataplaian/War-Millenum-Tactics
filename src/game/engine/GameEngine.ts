@@ -55,6 +55,7 @@ import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
 import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
 import { factionAttackWeapon } from '../content/attackAbilities';
+import { psychicCommunionBonus } from '../content/psychicCommunion';
 import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { validateTerrainPath } from '../terrain/movement';
@@ -275,7 +276,8 @@ export class GameEngine {
     const weapons = availableRangedWeapons(this.state, unitId);
     const shooter = validateShooter(this.state, unitId); if (!shooter.ok) return shooter;
     if (!weapons.ok && !(weapons.reason === 'NO_RANGED_WEAPONS' && capacityDefinition(this.state, shooter.value)?.firingDeck)) return weapons;
-    const draft = this.getState(); draft.shooting = { unitId, firedWeaponIds: [], hasRolled: false };
+    const draft = this.getState(); draft.shooting = { unitId, firedWeaponIds: [], hasRolled: false,
+      psychicCommunionBonus: psychicCommunionBonus(draft,shooter.value) };
     if (capacityDefinition(draft, shooter.value)?.firingDeck) { const selected = selectFiringDeck(draft, unitId, deck); if (!selected.ok) return selected; }
     else if (deck.length) return failure('FIRING_DECK_LIMIT');
     this.commit(draft);

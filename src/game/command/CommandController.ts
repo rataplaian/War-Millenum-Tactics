@@ -6,6 +6,7 @@ import { gainCommandPoints } from '../resources/CommandPoints';
 import { getUnitsRequiringBattleShockRoll, resolveBattleShockRoll } from './BattleShock';
 import { failure } from '../rules/movement';
 import type { RandomSource } from '../utils/dice';
+import { secureFactionObjectives } from '../content/stickyObjectives';
 export class CommandController {
   constructor(private s: GameState, private policies: FlowPolicies = {}) {}
   private addAbilities(step: CommandStep | 'MISSION_HOOK') {
@@ -32,6 +33,7 @@ export class CommandController {
       f.missionHookStarted = true; this.addAbilities('MISSION_HOOK');
       if (f.pending.length) return { ok: true, value: undefined };
     }
+    if (f.commandStep === 'END_OF_COMMAND_PHASE') secureFactionObjectives(s);
     flowEvent(s, 'COMMAND_STEP_COMPLETED', { step: f.commandStep });
     const next = COMMAND_STEPS[COMMAND_STEPS.indexOf(f.commandStep) + 1];
     if (next) this.enter(next);

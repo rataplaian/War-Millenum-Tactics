@@ -190,6 +190,7 @@ export type CommandResult<T = undefined> = { ok: true; value: T } | CommandFailu
 
 export type RangedWeapon = DeepReadonly<Extract<Weapon, { kind: 'ranged' }>>;
 export interface ShootingTransaction {
+  psychicCommunionBonus?: number;
   shootingMode?: 'NORMAL' | 'INDIRECT';
   attackChoices?: Record<string, AttackChoices>;
   hazardousCount?: number;

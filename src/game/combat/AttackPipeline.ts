@@ -51,7 +51,7 @@ export function createAttackJob(w: DeepReadonly<Weapon>, ids: readonly string[],
     const resolution = { weaponId: w.id, targetUnitId: target.id, eligibleFiringModelIds: [...ids], attackCounts: counts, attacks: counts.reduce((n, x) => n + x.resolved.value, 0), hitRolls: [], hits: 0, woundTarget: woundTarget(w.strength, s ? attackToughness(s, target) : d.stats.toughness), woundRolls: [], wounds: 0, saveResults: [], savesFailed: 0, damageResults: [], totalDamage: 0, destroyedModelIds: [], attackRecords: [], ...(mods.length ? { attackModifiers: copy([...mods]) } : {}) };
     return { weapon: copy(w) as Weapon, target: copy(target), targetDefinition: d, attackerUnitId: contexts[0]?.attackerUnitId ?? '', choices: copy(choices), precisionModelId, contexts, resolution, modelIds: counts.flatMap(x => Array.from({ length: x.resolved.value }, () => x.modelId)), index: 0, additionalRemaining: 0, current: null, stage: 'HIT', deferredMortals: [] };
 }
-export type RollWindow = (trigger: 'AFTER_HIT_ROLL' | 'AFTER_WOUND_ROLL', job: AttackJob) => boolean;
+export type RollWindow = (trigger: 'AFTER_HIT_ROLL' | 'AFTER_WOUND_ROLL' | 'AFTER_DAMAGE_ROLL', job: AttackJob) => boolean;
 /** One serializable state machine for Shooting and melee. Pausing never pre-rolls future dice. */
 export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pause?: RollWindow, allocation: DamageAllocationPolicy = allocateDamage): boolean {
     const r = j.resolution, w = j.weapon;
@@ -152,9 +152,8 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             const damage = () => { const v = value(w.damage, rng, j.choices.rerolls?.DAMAGE === 'ALL' ? permission(w, 'DAMAGE') : undefined); v.value = characteristic('DAMAGE', v.value) + (w.kind === 'ranged' && c.distance <= w.range / 2 + 1e-9 ? mod(a, 'MELTA', 'DAMAGE', amount(c, 'MELTA')) : 0); return v; };
             if (a.criticalWound && ability(c, 'DEVASTATING_WOUNDS')) {
                 a.damage = damage();
-                a.mortalWounds = a.damage.value;
-                j.deferredMortals.push({ recordIndex: r.attackRecords!.length, amount: a.damage.value });
-                finish();
+                j.stage = 'DAMAGE_RESULT';
+                if (pause?.('AFTER_DAMAGE_ROLL', j)) { r.pending = true; return false; }
                 continue;
             }
             const grouped = s && (j.target.models.some(m => m.sourceDefinitionId) || j.target.models.some(m => modelDefinition(s, j.target, m).keywords.some(k => k.toUpperCase() === 'CHARACTER')));
@@ -171,6 +170,20 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             }
             r.savesFailed++;
             a.damage = damage();
+            a.allocatedModelId = m.id;
+            j.stage = 'DAMAGE_RESULT';
+            if (pause?.('AFTER_DAMAGE_ROLL', j)) { r.pending = true; return false; }
+        }
+        if (j.stage === 'DAMAGE_RESULT') {
+            if (!a.damage) throw Error('Missing rolled damage');
+            if (a.criticalWound && ability(c, 'DEVASTATING_WOUNDS')) {
+                a.mortalWounds = a.damage.value;
+                j.deferredMortals.push({ recordIndex: r.attackRecords!.length, amount: a.damage.value });
+                finish();
+                continue;
+            }
+            const m = j.target.models.find(m=>m.id===a.allocatedModelId);
+            if (!m?.alive) throw Error('Invalid pending damage allocation');
             const before = m.woundsRemaining, ignored = ignoreWounds(s, j.target, m, a.damage.value, rng);
             a.ignoredDamage = ignored.ignored;
             a.fnpRolls = ignored.rolls;

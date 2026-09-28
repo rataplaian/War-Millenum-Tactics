@@ -34,7 +34,7 @@ const witchblade = (skill: number): Weapon => ({ ...melee('witchblade', 2, skill
 export const AELDARI_DATASHEETS: readonly UnitDefinition[] = [
   define({ id: 'farseer', name: 'Farseer', faction: A, movement: 7, toughness: 3, save: 6, wounds: 4, leadership: 6, oc: 1, base: 25, invulnerable: 4, keywords: ['INFANTRY','CHARACTER','PSYKER','AELDARI','ASURYANI','FARSEER'],
     weapons: [ranged('eldritch-storm',24,dice(1),3,6,-2,d3(),['BLAST','PSYCHIC']),{...shurikenPistol,skill:2},witchblade(2)],
-    abilities: [ability('BRANCHING_FATES'),ability('GUIDE')], attachment: { role: 'LEADER', canLeadDatasheetIds: ['storm-guardians'] } }),
+    abilities: [{...ability('BRANCHING_FATES'),whileLeading:true},ability('GUIDE')], attachment: { role: 'LEADER', canLeadDatasheetIds: ['storm-guardians'] } }),
   define({ id: 'warlock', name: 'Warlock', faction: A, movement: 7, toughness: 3, save: 6, wounds: 2, leadership: 6, oc: 1, base: 32, invulnerable: 4, keywords: ['INFANTRY','CHARACTER','PSYKER','AELDARI','ASURYANI','WARLOCK'],
     weapons: [ranged('destructor',12,dice(1),3,5,-1,1,['TORRENT','PSYCHIC']),shurikenPistol,witchblade(3)], abilities: [ability('RUNES_OF_FORTUNE'),ability('PSYCHIC_COMMUNION')],
     attachment: { role: 'SUPPORT', canLeadDatasheetIds: ['storm-guardians'] } }),

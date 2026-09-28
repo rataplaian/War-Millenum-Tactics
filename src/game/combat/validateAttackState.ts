@@ -47,13 +47,14 @@ export function validateAttackState(s: GameState) {
     validateWeapon(j.weapon);
     const tx = j.weapon.kind === 'ranged' ? s.shooting : s.closeCombat?.fight?.selected;
     require(tx?.unitId === j.attackerUnitId && tx.hasRolled && j.resolution.pending && s.phase === (j.weapon.kind === 'ranged' ? 'Shooting' : 'Fight'), 'job owner');
-    require(['HIT_RESULT', 'WOUND_RESULT'].includes(j.stage) && natural(j.index) && j.index < j.modelIds.length && natural(j.additionalRemaining) && !!j.current, 'job cursor');
+    require(['HIT_RESULT', 'WOUND_RESULT', 'DAMAGE_RESULT'].includes(j.stage) && natural(j.index) && j.index < j.modelIds.length && natural(j.additionalRemaining) && !!j.current, 'job cursor');
     require(j.resolution.weaponId === j.weapon.id && j.resolution.targetUnitId === j.target.id && j.targetDefinition.id === j.target.definitionId, 'job references');
     const target = s.units.find(u => u.id === j.target.id), source = s.units.find(u => u.id === j.attackerUnitId)!;
     require(target && target.playerId !== source.playerId && j.target.models.length === target.models.length && j.target.models.every(m => target.models.some(t => t.id === m.id && t.alive === m.alive && t.woundsRemaining === m.woundsRemaining)), 'job target');
     require(j.modelIds.every(id => source.models.some(m => m.id === id)) && j.contexts.every(c => c.attackerUnitId === source.id && c.targetUnitId === target!.id && j.modelIds.includes(c.attackerModelId)), 'job models');
     require(j.resolution.attacks === j.modelIds.length && j.resolution.attackCounts.every(c => natural(c.resolved.value)) && validAttackChoices(j.weapon, j.choices), 'job counts/choices');
-    const die = j.stage === 'HIT_RESULT' ? j.current!.hit : j.current!.wound;
-    require(die && natural(die.value, 1) && die.value <= 6 && natural(die.initial, 1) && die.initial <= 6 && typeof die.wasRerolled === 'boolean', 'paused die');
+    const die = j.stage === 'HIT_RESULT' ? j.current!.hit : j.stage === 'WOUND_RESULT' ? j.current!.wound : undefined;
+    if(j.stage==='DAMAGE_RESULT') require(j.current!.damage && natural(j.current!.damage.value) && (j.current!.allocatedModelId ? j.target.models.some(m=>m.id===j.current!.allocatedModelId&&m.alive) : j.current!.criticalWound) && j.current!.damage.rolls.every(n=>natural(n,1)), 'paused damage');
+    else require(die && natural(die.value, 1) && die.value <= 6 && natural(die.initial, 1) && die.initial <= 6 && typeof die.wasRerolled === 'boolean', 'paused die');
     require(j.deferredMortals.every(d => natural(d.amount) && natural(d.recordIndex) && !!j.resolution.attackRecords?.[d.recordIndex]), 'deferred mortals');
 }

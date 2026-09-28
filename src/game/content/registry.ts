@@ -8,6 +8,7 @@ import type { FactionContent } from './types';
 /** Only rules that currently have executable integration points belong here. */
 const implemented = {
   GUIDE: 'GameEngine.useGuide',
+  BRANCHING_FATES: 'GameEngine.useBranchingFates',
   RUNES_OF_FORTUNE: 'rules.chargeAllowance',
   BLADESTORM: 'combat.buildAttackContext',
   ASPECT_SHRINE: 'GameEngine.spendAspectShrineToken',

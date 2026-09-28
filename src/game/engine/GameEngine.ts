@@ -61,6 +61,7 @@ import { postShotHitTargets } from '../content/postShooting';
 import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { rollStrategistDie } from '../content/strategist';
+import { branchingFatesSource, branchingFatesStamp } from '../content/branchingFates';
 import { validateTerrainPath } from '../terrain/movement';
 import { isFinitePosition, EPSILON } from '../utils/geometry';
 import { availableRangedWeapons, validateShooter, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
@@ -392,14 +393,14 @@ export class GameEngine {
   private rollWindow(state: GameState): RollWindow {
     return (trigger, job) => {
       state.units = state.units.map(u => u.id === job.target.id ? job.target : u);
-      flowEvent(state, trigger, { weaponId: job.weapon.id, modelId: job.current!.modelId, roll: (trigger === 'AFTER_HIT_ROLL' ? job.current!.hit : job.current!.wound)!.value }, job.attackerUnitId);
+      flowEvent(state, trigger, { weaponId: job.weapon.id, modelId: job.current!.modelId, roll: trigger === 'AFTER_HIT_ROLL' ? job.current!.hit!.value : trigger === 'AFTER_WOUND_ROLL' ? job.current!.wound!.value : job.current!.damage!.value }, job.attackerUnitId);
       if (!state.flow) return false;
       const probe = copy(state);
       openWindow(probe, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
       const bearer = state.units.find(u => u.id === job.attackerUnitId);
       const aspectEligible = !!bearer?.resourceCounters?.ASPECT_SHRINE &&
         !!bearer.models.find(m => m.id === job.current?.modelId && m.alive && !modelKeywords(state, bearer, m).includes('CHARACTER'));
-      if (!aspectEligible && !probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
+      if (!(branchingFatesSource(state,job) || trigger!=='AFTER_DAMAGE_ROLL' && aspectEligible) && !probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
       openWindow(state, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
       return true;
     };
@@ -420,6 +421,21 @@ export class GameEngine {
       else job.resolution.woundRolls[job.resolution.woundRolls.length - 1] = 6;
       u.resourceCounters.ASPECT_SHRINE--;
       return { ok: true, value: undefined };
+    });
+  }
+  useBranchingFates():CommandResult {
+    return this.flowCommand(s=>{
+      const job=s.attackJob,w=s.flow?.window;
+      if(!job||!w||!['AFTER_HIT_ROLL','AFTER_WOUND_ROLL','AFTER_DAMAGE_ROLL'].includes(w.trigger)||w.unitId!==job.attackerUnitId)return failure('WRONG_TIMING');
+      const source=branchingFatesSource(s,job);if(!source)return failure('UNIT_NOT_ELIGIBLE');
+      const current=job.current!;
+      if(w.trigger==='AFTER_HIT_ROLL'){current.hit!.value=6;job.resolution.hitRolls[job.resolution.hitRolls.length-1]=6;}
+      else if(w.trigger==='AFTER_WOUND_ROLL'){current.wound!.value=6;job.resolution.woundRolls[job.resolution.woundRolls.length-1]=6;}
+      else {current.damage!.value=6;current.damage!.rolls=[6];}
+      current.modifiers.push({source:'BRANCHING_FATES',target:'DIE',amount:6,timing:w.trigger});
+      s.flow!.resolvedAbilities.push(branchingFatesStamp(s,source));
+      flowEvent(s,'BRANCHING_FATES_USED',{roll:w.trigger,modelId:current.modelId},job.attackerUnitId);
+      return {ok:true,value:undefined};
     });
   }
   resumeAttack(rng: RandomSource): CommandResult<WeaponResolution> {

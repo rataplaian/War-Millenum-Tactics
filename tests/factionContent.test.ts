@@ -9,6 +9,12 @@ import { createAttackJob, runAttackJob } from '../src/game/combat/AttackPipeline
 import { createTestMatch } from '../src/game/data/prototype';
 import { factionAttackWeapon } from '../src/game/content/attackAbilities';
 import { expireEffects } from '../src/game/effects/EffectEngine';
+import { effectiveCharacteristic } from '../src/game/effects/EffectEngine';
+import { chargeAllowance } from '../src/game/rules/closeCombat';
+import { createFactionContentRegistry, FACTION_CONTENT } from '../src/game/content/registry';
+import { validatePresetRoster } from '../src/game/content/validatePresetRoster';
+import { shootingModifiers } from '../src/game/terrain/attackModifiers';
+import { createVisibilityProvider } from '../src/game/terrain/visibility';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -152,6 +158,74 @@ test('Guide selects a visible target only at Movement end and improves allied Ae
   assert.equal(job.resolution.attackRecords?.[0]?.hitSucceeded,true);
   guided.turn=3;guided.activePlayerId='player-1';expireEffects(guided,'COMMAND_START');
   assert.equal(guided.flow?.effects.find(x=>x.source==='GUIDE:player-1')?.active,false);
+});
+test('the live content registry resolves nineteen selected profiles and reports unfinished rules explicitly',()=>{
+  const registry=createFactionContentRegistry();
+  for(const definition of [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS]) {
+    assert.equal(registry.datasheet(definition.id)?.id,definition.id);
+    for(const weapon of definition.weapons) assert.equal(registry.weapon(definition.id,weapon.id)?.id,weapon.id);
+  }
+  assert.equal(registry.enhancement('BREATH_OF_VAUL')?.points,10);
+  assert.equal(registry.enhancement('FAULTLESS_OPPORTUNIST')?.points,15);
+  assert.equal(registry.stratagem('DEATH_ECSTASY')?.cpCost,2);
+  assert.equal(registry.ability('GUIDE')?.resolverId,'GameEngine.useGuide');
+  assert.equal(registry.preset(AELDARI_PRESET.id)?.id,AELDARI_PRESET.id);
+  for(const [content,preset] of [[FACTION_CONTENT[0]!,AELDARI_PRESET],[FACTION_CONTENT[1]!,EMPERORS_CHILDREN_PRESET]] as const){
+    const result=validatePresetRoster(content,preset);
+    assert.equal(result.valid,false);
+    assert.ok(result.errors.some(error=>error.startsWith('Unregistered ability:')));
+  }
+});
+test('Warped Interference grants Cover while the Sorcerer leads, and stops when the leader dies',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(7);
+  const defender=s.units.find(u=>u.id==='tormentor-command')!,attacker=s.units.find(u=>u.id==='storm-council')!;
+  defender.location='BATTLEFIELD';attacker.location='BATTLEFIELD';
+  defender.models.forEach((m,i)=>m.position={x:7+i,y:10});
+  const model=attacker.models.find(m=>m.sourceDefinitionId==='farseer')!;model.position={x:7,y:5};
+  const weapon=s.definitions.find(d=>d.id===attacker.definitionId)!.weapons.find(w=>w.id==='farseer:eldritch-storm')!;
+  if(weapon.kind!=='ranged')assert.fail('expected ranged weapon');
+  const covered=shootingModifiers(s,model,defender,weapon.skill,createVisibilityProvider(s),weapon);
+  assert.equal(covered.modifiers.some(m=>m.source==='COVER'),true);
+  const sorcerer=defender.models.find(m=>m.sourceDefinitionId==='sorcerer')!;
+  sorcerer.alive=false;sorcerer.woundsRemaining=0;
+  const exposed=shootingModifiers(s,model,defender,weapon.skill,createVisibilityProvider(s),weapon);
+  assert.equal(exposed.modifiers.some(m=>m.source==='COVER'),false);
+});
+test('Doomweaver and Sorcerer witchfire hits apply the same temporary Move and Charge penalties',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  for(const [definitionId,weaponId] of [['night-spinner','doomweaver'],['sorcerer','agonising-energies']] as const){
+    const raw=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===definitionId)!;
+    const definition={...raw,attachment:undefined},s=createTestMatch();
+    s.phase='Shooting';s.definitions=[definition,s.definitions[1]!];
+    s.players[0]!.factionId=definition.factionId;s.armies[0]!.factionId=definition.factionId;
+    s.units[0]=createUnit(definition,'unit-1','player-1',[{x:5,y:5}]);
+    s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*1.5,y:10});
+    const e=engine(s);pass(e);
+    ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget(weaponId,'unit-2'));pass(e);
+    ok(e.fireWeapon(weaponId,'unit-2',()=>.6));
+    const after=e.getState();
+    assert.equal(effectiveCharacteristic(after,'unit-2','MOVE',6),4,definitionId);
+    assert.equal(chargeAllowance(after,7,[],'unit-2'),5,definitionId);
+    assert.deepEqual(new GameEngine(after).getState(),after);
+    after.turn=3;after.activePlayerId='player-1';expireEffects(after,'COMMAND_START');
+    assert.equal(effectiveCharacteristic(after,'unit-2','MOVE',6),6);
+    assert.equal(chargeAllowance(after,7,[],'unit-2'),7);
+  }
+});
+test('a missed Doomweaver and a Sorcerer hit on a Vehicle leave movement unaffected',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  for(const id of ['night-spinner','sorcerer'] as const){
+    const source=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)!,definition={...source,attachment:undefined},s=createTestMatch();
+    s.phase='Shooting';s.definitions=[definition,{...s.definitions[1]!,keywords:id==='sorcerer'?['VEHICLE']:['INFANTRY']}];
+    s.players[0]!.factionId=definition.factionId;s.armies[0]!.factionId=definition.factionId;
+    s.units[0]=createUnit(definition,'unit-1','player-1',[{x:5,y:5}]);s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*1.5,y:10});
+    const e=engine(s);pass(e);
+    const weapon=id==='sorcerer'?'agonising-energies':'doomweaver';
+    ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget(weapon,'unit-2'));pass(e);
+    ok(e.fireWeapon(weapon,'unit-2',id==='sorcerer'?()=>.6:()=>.01));
+    assert.equal(effectiveCharacteristic(e.getState(),'unit-2','MOVE',6),6);
+    assert.equal(chargeAllowance(e.getState(),7,[],'unit-2'),7);
+  }
 });
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;

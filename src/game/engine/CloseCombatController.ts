@@ -41,7 +41,7 @@ export class CloseCombatController {
     if (!legal.ok) return legal;
     if (!validateMovementAbilities(this.state, this.unit(unitId), abilityChoices, true)) return failure('INVALID_ABILITY_CHOICE');
     const rolls = rollD6s(2, rng), rolled = rolls.reduce((a, b) => a + b, 0);
-    const distance = this.combat.reaction?.mode==='INTO_THE_FRAY' ? Math.min(6,rolled) : rolled;
+    const distance = chargeAllowance(this.state,rolled,[],unitId);
     this.combat.charge = { unitId, rolls, distance, targetIds: [], abilityChoices };
     this.combat.declared.push(unitId);
     this.emit(unitId, { type: 'charge-declared' });
@@ -54,7 +54,7 @@ export class CloseCombatController {
     if (!charge) return failure('NO_CHARGE');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     if (!targetIds.length || new Set(targetIds).size !== targetIds.length) return failure('TARGETS_REQUIRED');
-    const allowance = chargeAllowance(this.state,charge.rolls.reduce((sum,roll)=>sum+roll,0),targetIds);
+    const allowance = chargeAllowance(this.state,charge.rolls.reduce((sum,roll)=>sum+roll,0),targetIds,charge.unitId);
     const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => thrillTargetLegal(this.state,this.unit(charge.unitId),target.id) && unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance,allowance) + EPSILON);
     const reaction=this.combat.reaction;
     if (targetIds.some(id => !legal.some(u => u.id === id)) ||

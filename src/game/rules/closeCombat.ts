@@ -1,6 +1,6 @@
 import { movementAbilities } from '../abilities/movement';
 import { unitHasCore } from '../abilities/registry';
-import { effectiveFlag } from '../effects/EffectEngine';
+import { effectiveFlag, modifierDelta } from '../effects/EffectEngine';
 import { canChargeAfterMove, thrillTargetLegal } from '../content/factionRules';
 import { sourceAbilities } from '../attachments/queries';
 import { arrivalLocked, battleStarted, onBattlefield, setupBusy } from '../reserves/location';
@@ -17,8 +17,8 @@ export const living = (unit: Unit) => onBattlefield(unit) ? unit.models.filter(m
 export const enemies = (state: GameState, unit: Unit) => state.units.filter(u => u.playerId !== unit.playerId && living(u).length);
 export const unitDistance = (a: Unit, b: Unit) => Math.min(...living(a).flatMap(m => living(b).map(n => edgeDistance(m, n))));
 /** Charge-roll modifiers are applied once to the selected target set, after the raw 2D6 roll. */
-export function chargeAllowance(state: GameState, raw: number, targetIds: readonly string[]): number {
-  const modified = Math.max(0, raw - (targetIds.some(id => {
+export function chargeAllowance(state: GameState, raw: number, targetIds: readonly string[], attackerUnitId?:string): number {
+  const modified = Math.max(0, raw + (attackerUnitId ? modifierDelta(state,attackerUnitId,'CHARGE_ROLL') : 0) - (targetIds.some(id => {
     const target = state.units.find(u => u.id === id);
     return !!target && sourceAbilities(state,target).some(x => x.ability.id === 'RUNES_OF_FORTUNE');
   }) ? 2 : 0));
@@ -96,13 +96,13 @@ export function reachablePositions(state: GameState, unit: Unit, model: Model, o
 /** Return targets belonging to at least one witnessed legal target combination. */
 export function getLegalChargeTargets(state: GameState, unit: Unit, roll: number): Unit[] {
   if (!Number.isInteger(roll) || roll < 2 || roll > 12) return [];
-  const candidates = enemies(state, unit).filter(target => thrillTargetLegal(state,unit,target.id) && unitDistance(unit, target) <= Math.min(COMBAT_RULES.chargeTargetDistance, chargeAllowance(state,roll,[target.id])) + EPSILON);
+  const candidates = enemies(state, unit).filter(target => thrillTargetLegal(state,unit,target.id) && unitDistance(unit, target) <= Math.min(COMBAT_RULES.chargeTargetDistance, chargeAllowance(state,roll,[target.id],unit.id)) + EPSILON);
   const legal = new Set<string>();
   let attempts = 0;
   const visit = (index: number, ids: string[]) => {
     if (attempts >= 256) return;
     if (index === candidates.length) {
-      const allowance = chargeAllowance(state,roll,ids);
+      const allowance = chargeAllowance(state,roll,ids,unit.id);
       if (ids.length && ++attempts && ids.every(id=>unitDistance(unit,state.units.find(u=>u.id===id)!)<=allowance+EPSILON) && findChargeFormation(state, unit, ids, allowance)) ids.forEach(id => legal.add(id));
       return;
     }

@@ -28,6 +28,12 @@ Lord Exultant's Perfectionists and Lord Kakophonist's Obsessive Annunciation now
 
 Farseer Guide now selects a visible enemy within 18 inches at the end of the Movement phase. A temporary effect marks the target until the start of the Aeldari player's next Command phase; the common Hit resolution grants +1 only to friendly Aeldari attacks against that target, without editing weapons or enemy datasheets.
 
+`content/registry.ts` now constructs an actual lookup for both factions, both presets, the selected weapons, the twelve Stratagem definitions, and only those datasheet ability IDs with real engine integration. `validatePresetRoster` deliberately reports missing executable ability IDs for both presets; it must pass before this draft can become reviewable. Do not replace this guard with empty or no-op resolvers.
+
+Sorcerer's Warped Interference now grants Cover to its attached unit through the existing terrain shooting modifier, even in clear terrain; the bonus disappears when its bearer is destroyed. The usual Ignores Cover permission remains authoritative.
+
+Night Spinner's Monofilament Web and Sorcerer's Wracking Agonies now share a post-shot effect hook. A hit with the specified weapon slows an eligible surviving target by 2 inches and reduces its charge roll by 2 until the attacker's next turn; Wracking Agonies requires Infantry. Attack snapshots, movement characteristics, and charge target previews use the same serializable effect data.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

@@ -55,6 +55,7 @@ import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
 import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
 import { factionAttackWeapon } from '../content/attackAbilities';
+import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { validateTerrainPath } from '../terrain/movement';
 import { isFinitePosition, EPSILON } from '../utils/geometry';
@@ -378,6 +379,7 @@ export class GameEngine {
       for (const m of resolution.attackModifiers ?? []) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(attackerUnitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId: job.target.id, effectiveSkill: m.effectiveSkill });
       for (const damage of resolution.damageResults) this.event(attackerUnitId, { type: 'model-damaged', targetUnitId: job.target.id, weaponId: weapon.id, damage });
       for (const modelId of resolution.destroyedModelIds) this.event(attackerUnitId, { type: 'model-destroyed', targetUnitId: job.target.id, weaponId: weapon.id, modelId });
+      applyShootingOnHitEffects(this.state,job);
     } else { if(this.state.closeCombat?.fight?.selected) delete this.state.closeCombat.fight.selected.selectedTarget;
       this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution }); }
     queueDestructions(before, this.state, attackerUnitId);
@@ -505,7 +507,7 @@ export class GameEngine {
     const candidates=getLegalChargeTargets(this.state, source, raw);
     if(reaction?.targetUnitId && !candidates.some(u=>u.id===reaction.targetUnitId)) return [];
     return copy(candidates.filter(u=>
-      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],chargeAllowance(this.state,raw,[reaction.targetUnitId,u.id]))) &&
+      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],chargeAllowance(this.state,raw,[reaction.targetUnitId,u.id],source.id))) &&
       (reaction?.mode!=='LEAP_TO_DEFEND' || u.state.hasCharged) &&
       (reaction?.mode!=='INTO_THE_FRAY' || unitDistance(source,u)<=6+EPSILON)));
   }

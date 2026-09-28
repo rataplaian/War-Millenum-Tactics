@@ -20,9 +20,9 @@ export function validateCloseCombatState(state: GameState): void {
     const charge = combat.charge, source = unit(charge.unitId);
     require(state.status === 'in-progress' && (combat.reaction ? combat.reaction.unitId===charge.unitId && source?.playerId!==state.activePlayerId : state.phase === 'Charge' && source?.playerId === state.activePlayerId) && combat.declared.includes(charge.unitId), 'charge owner/phase');
     const raw = charge.rolls.reduce((a,b)=>a+b,0);
-    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === chargeAllowance(state,raw,charge.targetIds), 'charge roll');
+    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === chargeAllowance(state,raw,charge.targetIds,charge.unitId), 'charge roll');
     require(ids(charge.targetIds) && charge.targetIds.every(id => unit(id)!.playerId !== source!.playerId), 'charge targets');
-    require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === chargeAllowance(state,raw,[]) && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
+    require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === chargeAllowance(state,raw,[],charge.unitId) && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
   }
   const fight = combat.fight;
   if (fight) {

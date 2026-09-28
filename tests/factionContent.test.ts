@@ -113,6 +113,14 @@ test('Emperor’s Children chosen leader weapons preserve D3 damage and the defa
   assert.deepEqual(exultant.weapons.map(w=>w.id),['bolt-pistol','plasma-pistol','phoenix-power-spear','lord-close-combat-weapon']);
   assert.ok(exultant.keywords.includes('SLAANESH'));
 });
+test('Chaos Land Raider carries two separately targetable lascannons with matching profiles',()=>{
+  const d=EMPERORS_CHILDREN_DATASHEETS.find(x=>x.id==='chaos-land-raider')!;
+  const guns=d.weapons.filter(w=>w.id.startsWith('soulshatter-lascannon'));
+  assert.deepEqual(guns.map(w=>w.id),['soulshatter-lascannon','soulshatter-lascannon-2']);
+  assert.equal(guns[0]?.name,guns[1]?.name);
+  assert.deepEqual(guns[0]?.attacks,{kind:'fixed',value:2});
+  assert.deepEqual(guns[1]?.damage,{kind:'dice',count:1,sides:6,modifier:1});
+});
 test('attached leaders grant Perfectionists and Obsessive Annunciation only while leading', () => {
   const s=createAeldariVsEmperorsChildrenMatch(4);
   const target=s.units.find(u=>u.id==='storm-council')!,infractors=s.units.find(u=>u.id==='infractor-command')!,noise=s.units.find(u=>u.id==='noise-command')!;

@@ -21,6 +21,8 @@ const implemented = {
   DAMAGED_NIGHT_SPINNER: 'combat.hitOutcome',
   DAMAGED_LAND_RAIDER: 'combat.hitOutcome',
   WAVE_SERPENT_SHIELD: 'content.defensiveWoundPenalty',
+  SERPENT_SHIELD: 'content.serpentShieldSave',
+  CREWED_PLATFORM: 'content.removeUncrewedPlatform',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

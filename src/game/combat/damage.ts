@@ -3,6 +3,7 @@ import type { RandomSource } from '../utils/dice';
 import { allocationModel } from '../attachments/AllocationGroups';
 import { modelCore } from '../abilities/registry';
 import { rollDie } from './dice';
+import { removeUncrewedPlatform } from '../content/defensiveAbilities';
 /** 24.12: one independent ignore-wound roll per lost wound, after saves. */
 export function ignoreWounds(s: GameState | undefined, u: Unit, m: Model, amount: number, rng: RandomSource) {
     if (!Number.isSafeInteger(amount) || amount < 0) throw Error('Invalid damage amount');
@@ -35,6 +36,7 @@ export function resolveMortalWounds(s: GameState | undefined, u: Unit, amount: n
         m.woundsRemaining -= result.lost;
         m.alive = m.woundsRemaining > 0;
         records.push({ modelId: m.id, ...result, destroyed: !m.alive });
+        if (!m.alive) for (const id of removeUncrewedPlatform(u)) records.push({modelId:id,lost:0,ignored:0,rolls:[],destroyed:true});
     }
     return { records, ignored: records.reduce((n, r) => n + r.ignored, 0), applied: records.reduce((n, r) => n + r.lost, 0), destroyedModelIds: records.filter(r => r.destroyed).map(r => r.modelId) };
 }

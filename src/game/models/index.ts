@@ -30,6 +30,8 @@ export type BaseGeometry = { kind: 'circle'; diameterMm: number };
 export interface Player { id: PlayerId; name: string; factionId: FactionId; commandPoints?: number; extraCpGainedThisBattleRound?: number; forceDisposition?: ForceDisposition }
 export interface Army { id: string; playerId: PlayerId; factionId: FactionId; unitIds: string[] }
 export interface Model {
+  /** Optional identity within a mixed datasheet, preserved in snapshots and attachments. */
+  profileRole?: string;
   /** Optional model-specific loadout and characteristics for mixed datasheets. */
   weaponIds?: string[];
   stats?: Partial<UnitStats>;
@@ -64,7 +66,7 @@ export interface Ability { scope?: 'UNIT' | 'MODEL'; effect?: EffectPayload; whi
 export interface UnitStats { movement: number; toughness: number; save: number; wounds: number; leadership: number; objectiveControl: number }
 export type UnitDefinition = DeepReadonly<{
   id: string; name: string; factionId: FactionId; modelCount: number; stats: UnitStats;
-  modelProfiles?: { count: number; base?: BaseGeometry; stats?: Partial<UnitStats>; weaponIds: string[]; coreAbilities?: CoreAbility[] }[];
+  modelProfiles?: { count: number; role?: string; base?: BaseGeometry; stats?: Partial<UnitStats>; weaponIds: string[]; coreAbilities?: CoreAbility[] }[];
   attachment?: AttachmentDefinition; transport?: TransportCapacityDefinition; invulnerableSave?: number; invulnerableSaveRanged?: number;
   points?: number; coreAbilities?: CoreAbility[];
   defaultBase: BaseGeometry;

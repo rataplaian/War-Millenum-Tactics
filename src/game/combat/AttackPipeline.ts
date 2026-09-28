@@ -14,7 +14,7 @@ import type { AttackJob, AttackRecord, AttackContext } from './types';
 import { isCriticalWound, rollDie, reroll, canReroll, type RollKind, type RerollPermission } from './dice';
 import { resolveSave } from './save';
 import { modelWithinObjective } from '../missions/objectives';
-import { defensiveWoundPenalty } from '../content/defensiveAbilities';
+import { defensiveWoundPenalty, serpentShieldSave, removeUncrewedPlatform } from '../content/defensiveAbilities';
 import { ignoreWounds, resolveMortalWounds } from './damage';
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const ability = (c: AttackContext, t: WeaponAbilityType) => c.abilities.find(a => a.type === t);
@@ -163,7 +163,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 throw Error('Invalid allocation');
             const d = s ? modelDefinition(s, j.target, m) : j.targetDefinition;
             const save = characteristic('SAVE', m.stats?.save ?? d.stats.save, j.target.id, m.id), ap = characteristic('AP', w.armourPenetration - (s && w.kind==='melee' && effectiveFlag(s,c.attackerUnitId,'MELEE_AP_BONUS') ? 1 : 0));
-            a.save = resolveSave(save, w.kind === 'ranged' ? d.invulnerableSaveRanged ?? d.invulnerableSave : d.invulnerableSave, ap, rng, !!permission(w, 'SAVE') && j.choices.rerolls?.SAVE === 'FAILED');
+            a.save = resolveSave(save, serpentShieldSave(j.target) ?? (w.kind === 'ranged' ? d.invulnerableSaveRanged ?? d.invulnerableSave : d.invulnerableSave), ap, rng, !!permission(w, 'SAVE') && j.choices.rerolls?.SAVE === 'FAILED');
             r.saveResults.push(a.save);
             if (a.save.saved) {
                 finish();
@@ -182,6 +182,9 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
             if (!m.alive) {
                 r.destroyedModelIds.push(m.id);
                 a.casualtyIds.push(m.id);
+                const crewed=removeUncrewedPlatform(j.target);
+                r.destroyedModelIds.push(...crewed);
+                a.casualtyIds.push(...crewed);
             }
             finish();
         }
@@ -193,6 +196,8 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
         r.attackRecords![deferred.recordIndex]!.casualtyIds = outcome.destroyedModelIds;
         r.totalDamage += outcome.applied;
         r.destroyedModelIds.push(...outcome.destroyedModelIds);
+        const crewed=removeUncrewedPlatform(j.target);
+        r.destroyedModelIds.push(...crewed);
     }
     j.deferredMortals = [];
     j.stage = 'DONE';

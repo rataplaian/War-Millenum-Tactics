@@ -15,6 +15,7 @@ import { createFactionContentRegistry, FACTION_CONTENT } from '../src/game/conte
 import { validatePresetRoster } from '../src/game/content/validatePresetRoster';
 import { shootingModifiers } from '../src/game/terrain/attackModifiers';
 import { createVisibilityProvider } from '../src/game/terrain/visibility';
+import { serpentShieldSave } from '../src/game/content/defensiveAbilities';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -263,6 +264,24 @@ test('Wave Serpent Shield penalizes strong ranged wounds only, without changing 
   assert.equal(resolve({...strong,kind:'melee',range:null}).woundSucceeded,true);
   assert.equal(strong.strength,13);
   assert.equal(base.strength,s.definitions[0]!.weapons[0]!.strength);
+});
+test('Storm Guardian platform grants 5+ invulnerable saves then dies when the final Guardian falls',()=>{
+  const s=createTestMatch(),storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
+  const target=createUnit(storm,'unit-2','player-2',Array.from({length:11},(_,i)=>({x:4+i*1.5,y:10})));
+  s.definitions=[s.definitions[0]!,storm];s.units[1]=target;
+  assert.equal(target.models.filter(m=>m.profileRole==='STORM_GUARDIAN').length,10);
+  assert.equal(serpentShieldSave(target),5);
+  for(const model of target.models.slice(0,9)){model.alive=false;model.woundsRemaining=0;}
+  const base=s.definitions[0]!.weapons[0]!;
+  const shot={...base,attacks:{kind:'fixed' as const,value:1},strength:10,armourPenetration:-4,damage:{kind:'fixed' as const,value:1}};
+  const job=createAttackJob(shot,[s.units[0]!.models[0]!.id],target,storm,()=>.5,[],s);
+  runAttackJob(job,()=>.5,s);
+  assert.equal(job.resolution.saveResults[0]?.selected,'INVULNERABLE');
+  assert.equal(job.resolution.saveResults[0]?.saved,false);
+  assert.deepEqual(job.resolution.destroyedModelIds.sort(),[target.models[9]!.id,target.models[10]!.id].sort());
+  assert.equal(job.target.models.at(-1)?.alive,false);
+  assert.equal(serpentShieldSave(job.target),undefined);
+  assert.equal(target.models.at(-1)?.alive,true); // detached attack job leaves source state untouched until commit
 });
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;

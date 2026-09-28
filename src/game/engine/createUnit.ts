@@ -14,6 +14,6 @@ export function createUnit(definition: UnitDefinition, id: string, playerId: str
       id: `${id}:model:${index + 1}`, unitId: id,
       woundsRemaining: profile?.stats?.wounds ?? definition.stats.wounds, position: { ...position }, alive: true,
       base: { ...(profile?.base ?? definition.defaultBase) }, movementUsed: 0,
-      ...(profile ? { weaponIds: [...profile.weaponIds], stats: { ...profile.stats }, ...(profile.coreAbilities ? { coreAbilities: [...profile.coreAbilities] } : {}) } : {}),
+      ...(profile ? { weaponIds: [...profile.weaponIds], stats: { ...profile.stats }, ...(profile.role ? { profileRole: profile.role } : {}), ...(profile.coreAbilities ? { coreAbilities: [...profile.coreAbilities] } : {}) } : {}),
     }; }) };
 }

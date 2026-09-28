@@ -32,6 +32,7 @@ const implemented = {
   EUPHORIC_STRIKES: 'GameEngine.activateEuphoricStrikes',
   TERRIFYING_CRESCENDO: 'GameEngine.useTerrifyingCrescendo',
   DOOM_SIREN: 'GameEngine.useDoomSiren',
+  PATH_OF_COMMAND: 'stratagems.StratagemEngine',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

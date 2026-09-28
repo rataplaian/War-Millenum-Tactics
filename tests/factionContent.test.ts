@@ -503,6 +503,25 @@ test('Doom Siren rolls deterministic 3D6 after a hit, spills mortal wounds and t
   assert.equal(e.useDoomSiren('unit-1','unit-2',()=>.99).ok,false);
   assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
 });
+test('Path of Command explicitly discounts one targeted Stratagem per army per round and survives snapshots',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const autarch={...AELDARI_DATASHEETS.find(d=>d.id==='autarch')!,attachment:undefined},s=createTestMatch();
+  s.phase='Movement';s.definitions=[autarch,s.definitions[1]!];s.players[0]!.factionId=autarch.factionId;s.armies[0]!.factionId=autarch.factionId;
+  s.players[0]!.commandPoints=1;s.units[0]=createUnit(autarch,'unit-1','player-1',[{x:5,y:5}]);
+  s.stratagemDefinitions=[{id:'technical-ward',name:'Ward',labels:['STRATEGIC_PLOY'],cpCost:2,
+    timing:{phases:['Movement'],triggers:['START_OF_PHASE'],ownership:'YOUR_TURN'},target:{relation:'FRIENDLY',count:1},
+    resolverId:'APPLY_EFFECT',effect:{source:'technical-ward',payload:{kind:'FLAG',flag:'TECHNICAL_WARD',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'REPLACE_SAME_SOURCE'}}];
+  const initial=engine(s).getState();initial.flow!.window={...initial.flow!.window!,trigger:'START_OF_PHASE'};
+  const e=new GameEngine(initial);
+  assert.equal(e.useStratagem('technical-ward','player-1',['unit-1']).ok,false);
+  ok(e.useStratagem('technical-ward','player-1',['unit-1'],undefined,undefined,true));
+  const after=e.getState();assert.equal(after.players[0]!.commandPoints,0);
+  assert.equal(after.flow!.usage.filter(u=>u.stratagemId==='PATH_OF_COMMAND').length,1);
+  assert.equal(after.events.some(x=>x.type==='flow'&&x.name==='STRATAGEM_USED'&&x.detail.cost===1),true);
+  const rejected=e.useStratagem('technical-ward','player-1',['unit-1'],undefined,undefined,true);
+  assert.equal(rejected.ok,false);if(!rejected.ok)assert.equal(rejected.reason,'USAGE_LIMIT');
+  assert.deepEqual(new GameEngine(after).getState(),after);
+});
 test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;
   unit.location='BATTLEFIELD';unit.models.filter(m=>m.componentUnitId==='storm-guardians').forEach(m=>{m.alive=false;m.woundsRemaining=0;});

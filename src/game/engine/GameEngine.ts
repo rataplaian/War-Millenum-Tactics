@@ -764,7 +764,7 @@ export class GameEngine {
   resolveCommandAbility(id: string) { return this.flowCommand(s => new CommandController(s, this.policies.flow).resolve(id)); }
   passTimingWindow(playerId: string) { return this.flowCommand(s => passWindow(s, playerId)); }
   getStratagemOptions(playerId: string) { return copy(new StratagemEngine(this.getState(), this.policies.stratagems).options(playerId)); }
-  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng, mode)); }
+  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string, pathOfCommand=false) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng, mode,pathOfCommand)); }
   gainCommandPoints(playerId: string, amount: number, policy: { ignoreLimit?: boolean; limit?: number } = {}) { return this.flowCommand(s => gainCommandPoints(s, playerId, amount, 'OTHER_CP_GAIN', policy)); }
   canSpendCommandPoints(playerId: string, amount: number) { return canSpendCommandPoints(this.state, playerId, amount); }
   spendCommandPoints(playerId: string, amount: number) { return this.flowCommand(s => spendCommandPoints(s, playerId, amount)); }

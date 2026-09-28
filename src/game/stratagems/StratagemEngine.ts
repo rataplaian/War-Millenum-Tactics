@@ -1,4 +1,4 @@
-import { unitKeywords } from '../attachments/queries';
+import { modelDefinition, unitKeywords } from '../attachments/queries';
 import type { CommandResult, GameState } from '../models';
 import { failure } from '../rules/movement';
 import { onBattlefield } from '../reserves/location';
@@ -14,10 +14,17 @@ export class StratagemEngine {
   constructor(private s: GameState, private policy: StratagemPolicies = {}) {}
   private get restrictions() { return { ...CORE_REACTION_POLICIES.restrictions, ...FACTION_STRATAGEM_POLICIES.restrictions, ...this.policy.restrictions }; }
   private get resolvers() { return { ...CORE_REACTION_POLICIES.resolvers, ...FACTION_STRATAGEM_POLICIES.resolvers, ...this.policy.resolvers }; }
-  private cost(d:StratagemDefinition,playerId:string,targets:readonly string[],mode?:string) {return this.policy.cost?.(this.s,d,playerId,targets,mode) ?? CORE_REACTION_POLICIES.cost?.(this.s,d,playerId,targets,mode) ?? d.cpCost;}
+  private cost(d:StratagemDefinition,playerId:string,targets:readonly string[],mode?:string,pathOfCommand=false) {
+    const base=this.policy.cost?.(this.s,d,playerId,targets,mode) ?? CORE_REACTION_POLICIES.cost?.(this.s,d,playerId,targets,mode) ?? d.cpCost;
+    return pathOfCommand?Math.max(0,base-1):base;
+  }
+  private canUsePathOfCommand(playerId:string,targets:readonly string[]) {
+    return !this.s.flow?.usage.some(u=>u.stratagemId==='PATH_OF_COMMAND'&&u.playerId===playerId&&u.round===this.s.round) &&
+      targets.some(id=>{const unit=this.s.units.find(u=>u.id===id);return !!unit&&unit.playerId===playerId&&unit.models.some(m=>m.alive&&modelDefinition(this.s,unit,m).abilities.some(a=>a.id==='PATH_OF_COMMAND'));});
+  }
   private phaseExempt(d:StratagemDefinition,playerId:string,targets:readonly string[]) {return this.policy.exemptPhaseUsage?.(this.s,d,playerId,targets) ?? CORE_REACTION_POLICIES.exemptPhaseUsage?.(this.s,d,playerId,targets) ?? false;}
   definitions() { return this.policy.definitions ?? this.s.stratagemDefinitions ?? TEST_STRATAGEMS; }
-  validate(id: string, playerId: string, targets: readonly string[], mode?:string): CommandResult<StratagemDefinition> {
+  validate(id: string, playerId: string, targets: readonly string[], mode?:string, pathOfCommand=false): CommandResult<StratagemDefinition> {
     const s = this.s, f = s.flow, w = f?.window, d = this.definitions().find(d => d.id === id);
     if (!d) return failure('STRATAGEM_NOT_FOUND');
     if (s.status !== 'in-progress') return failure('MATCH_FINISHED');
@@ -36,7 +43,8 @@ export class StratagemEngine {
         (c === 'ON_BATTLEFIELD' && !onBattlefield(u)) || (c === 'ALIVE' && !u.models.some(m => m.alive)) || (c === 'NOT_SHOT' && u.state.hasShot))) return failure('UNIT_NOT_ELIGIBLE');
     }
     if (d.restrictions?.some(r => !this.restrictions[r]?.(JSON.parse(JSON.stringify(s)), playerId, [...targets]))) return failure('UNIT_NOT_ELIGIBLE');
-    const cost=this.cost(d,playerId,targets,mode);if(!Number.isSafeInteger(cost)||cost<0)return failure('INVALID_CONFIGURATION');
+    if(pathOfCommand&&!this.canUsePathOfCommand(playerId,targets))return failure('USAGE_LIMIT');
+    const cost=this.cost(d,playerId,targets,mode,pathOfCommand);if(!Number.isSafeInteger(cost)||cost<0)return failure('INVALID_CONFIGURATION');
     const cp = canSpendCommandPoints(s, playerId, cost); if (!cp.ok) return cp;
     if (targets.some(id => { const u = s.units.find(u => u.id === id)!; return u.playerId === playerId && u.state.battleShocked && !d.overrides?.allowBattleShockedTarget; })) return failure('BATTLE_SHOCKED');
     const own = f.usage.filter(u => u.playerId === playerId), same = own.filter(u => u.stratagemId === id);
@@ -47,16 +55,17 @@ export class StratagemEngine {
     if (d.resolverId === 'APPLY_EFFECT' && !d.effect) return failure('INVALID_CONFIGURATION');
     return { ok: true, value: d };
   }
-  use(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string): CommandResult {
-    const legal = this.validate(id, playerId, targets,mode); if (!legal.ok) return legal;
+  use(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string, pathOfCommand=false): CommandResult {
+    const legal = this.validate(id, playerId, targets,mode,pathOfCommand); if (!legal.ok) return legal;
     const d = legal.value, s = this.s;
     // Caller provides a detached transaction. Resolver failure/throw cannot spend live CP.
-    const cost=this.cost(d,playerId,targets,mode);
+    const cost=this.cost(d,playerId,targets,mode,pathOfCommand);
     spendCommandPoints(s, playerId, cost);
     if (d.resolverId === 'APPLY_EFFECT') for (const unitId of targets) applyEffect(s, { ...d.effect!, target: { unitId } });
     else if (d.resolverId === 'CLEAR_BATTLE_SHOCK') for (const unitId of targets) { s.units.find(u => u.id === unitId)!.state.battleShocked = false; flowEvent(s, 'BATTLE_SHOCK_CLEARED', { source: id }, unitId); }
     else { const result = this.resolvers[d.resolverId]!(s, targets, d, rng, mode); if (!result.ok) return result; }
     s.flow!.usage.push({ stratagemId: id, playerId, targetIds: [...targets], phaseIndex: s.flow!.phaseIndex, turn: s.turn, round: s.round });
+    if(pathOfCommand)s.flow!.usage.push({stratagemId:'PATH_OF_COMMAND',playerId,targetIds:[...targets],phaseIndex:s.flow!.phaseIndex,turn:s.turn,round:s.round});
     s.flow!.window!.passedPlayerIds = [];
     flowEvent(s, 'STRATAGEM_USED', { stratagemId: id, targetIds: targets, cost }, '', playerId);
     return { ok: true, value: undefined };

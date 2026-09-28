@@ -129,7 +129,7 @@ export interface GameState {
   /** Destroyed melee defenders that must strike after their attacker completes its activation. */
   fightOnDeath?: { defenderUnitId: string; attackerUnitId: string; modelIds: string[] }[];
   stratagemDefinitions?: StratagemDefinition[];
-  reactionMove?: { unitId: string; source: 'OPPORTUNITY_SEIZED'|'FADE_BACK'; allowance: number;
+  reactionMove?: { unitId: string; source: 'OPPORTUNITY_SEIZED'|'FADE_BACK'|'PATH_OF_THE_OUTCAST'; allowance: number;
     originals: { modelId: string; position: Position }[]; used: Record<string,number> } | null;
   battleFocus?: { battleSize: 'INCURSION' | 'STRIKE_FORCE' | 'ONSLAUGHT'; round: number; tokens: Record<PlayerId,number>;
     usedByPhase: Record<string,string[]>; manoeuvresByPhase: Record<string,string[]> };

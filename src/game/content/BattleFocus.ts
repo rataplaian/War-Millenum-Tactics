@@ -5,6 +5,7 @@ import { failure } from '../rules/movement';
 import { hasFactionRule } from './factionRules';
 import { flowEvent } from '../flow/events';
 import { rollD6, type RandomSource } from '../utils/dice';
+import { canUseSuperlativeStrategist, rollStrategistDie } from './strategist';
 
 export const AGILE_MANOEUVRES = ['SWIFT_AS_THE_WIND','FLITTING_SHADOWS','STAR_ENGINES','SUDDEN_STRIKE','OPPORTUNITY_SEIZED','FADE_BACK'] as const;
 export type AgileManoeuvre = typeof AGILE_MANOEUVRES[number];
@@ -16,7 +17,7 @@ export function resetBattleFocus(s: GameState): void {
   s.battleFocus.usedByPhase={};s.battleFocus.manoeuvresByPhase={};
 }
 /** One token and one manoeuvre per unit per phase; only Swift may repeat on different units. */
-export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?:RandomSource): CommandResult {
+export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?:RandomSource, reroll=false): CommandResult {
   const focus=s.battleFocus,u=s.units.find(x=>x.id===unitId);
   if (!focus || !u || !hasFactionRule(s,u,'BATTLE_FOCUS') || !onBattlefield(u) || !u.models.some(m=>m.alive)) return failure('UNIT_NOT_ELIGIBLE');
   if (trigger==='MOVE' && (s.movement || u.state.hasMoved)) return failure('MOVEMENT_IN_PROGRESS');
@@ -40,6 +41,7 @@ export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, t
     const from=[...s.events].reverse().find(e=>e.type==='shooting-started' && e.unitId===attacker)?.sequence??0;
     if(!attacker || !s.events.some(e=>e.sequence>from && e.type==='weapon-fired' && e.unitId===attacker && e.resolution.targetUnitId===unitId && e.resolution.hits>0)) return failure('UNIT_NOT_ELIGIBLE');
   }
+  if (reroll && (!(id==='FADE_BACK'||id==='OPPORTUNITY_SEIZED') || !canUseSuperlativeStrategist(s,u))) return failure('INVALID_ABILITY_CHOICE');
   if(id==='FADE_BACK'||id==='OPPORTUNITY_SEIZED') {
     if (s.reactionMove || s.movement || s.shooting || s.closeCombat?.move || s.definitions.find(d=>d.id===u.definitionId)?.keywords.includes('TITANIC')) return failure('UNIT_NOT_ELIGIBLE');
     if (!rng) return failure('INVALID_CONFIGURATION');
@@ -49,9 +51,10 @@ export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, t
   if (id==='STAR_ENGINES') applyEffect(s,{source:id,target:{unitId},payload:{kind:'FLAG',flag:'RANGED_ASSAULT',value:true},expiry:'END_OF_CURRENT_TURN',stacking:'NON_STACKING'});
   if (id==='SUDDEN_STRIKE') applyEffect(s,{source:id,target:{unitId},payload:{kind:'FLAG',flag:'EXTENDED_TACTICAL_MOVE',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'NON_STACKING'});
   if(id==='FADE_BACK'||id==='OPPORTUNITY_SEIZED') {
-    const roll=rollD6(rng!);
+    const die=reroll ? rollStrategistDie(rng!,true) : undefined;
+    const roll=die?.value ?? rollD6(rng!);
     s.reactionMove={unitId,source:id,allowance:roll+1,originals:u.models.map(m=>({modelId:m.id,position:{...m.position}})),used:{}};
-    flowEvent(s,'AGILE_MANOEUVRE_USED',{manoeuvre:id,roll,allowance:roll+1},unitId,u.playerId);
+    flowEvent(s,'AGILE_MANOEUVRE_USED',{manoeuvre:id,roll,allowance:roll+1,...(die?{initial:die.initial,rerolled:die.wasRerolled,source:'SUPERLATIVE_STRATEGIST'}:{})},unitId,u.playerId);
   } else flowEvent(s,'AGILE_MANOEUVRE_USED',{manoeuvre:id},unitId,u.playerId);
   focus.tokens[u.playerId] = focus.tokens[u.playerId]! - 1; (focus.usedByPhase[key]??=[]).push(unitId);(focus.manoeuvresByPhase[key]??=[]).push(id);
   return {ok:true,value:undefined};

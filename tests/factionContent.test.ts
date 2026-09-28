@@ -23,6 +23,39 @@ import { validAttackChoices } from '../src/game/abilities/validation';
 import { abilitiesFor, allHave, scoutDistance } from '../src/game/deployment/abilities';
 import { postShotHitTargets } from '../src/game/content/postShooting';
 import { resolveBattleShockRoll } from '../src/game/command/BattleShock';
+import { canUseSuperlativeStrategist, rollStrategistDie } from '../src/game/content/strategist';
+
+test('Superlative Strategist rerolls one movement die for a living attached Autarch',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(9),unit=s.units.find(u=>u.id==='avenger-command')!;
+  assert.equal(canUseSuperlativeStrategist(s,unit),true);
+  let i=0;const die=rollStrategistDie(()=>[0,.99][i++]!,true);
+  assert.deepEqual([die.initial,die.value,die.wasRerolled,die.rerollSource],[1,6,true,'SUPERLATIVE_STRATEGIST']);
+  assert.equal(i,2);
+  const noReroll=rollStrategistDie(()=>0,false);
+  assert.equal(noReroll.wasRerolled,false);
+  const leader=unit.models.find(m=>m.sourceDefinitionId==='autarch')!;
+  leader.alive=false;
+  assert.equal(canUseSuperlativeStrategist(s,unit),false);
+});
+test('Rangers react to a nearby completed enemy move using the shared reaction transaction',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const ranger=AELDARI_DATASHEETS.find(d=>d.id==='rangers')!,s=createTestMatch();
+  s.phase='Movement';s.turn=2;s.activePlayerId='player-2';s.definitions=[ranger,s.definitions[1]!];
+  s.players[0]!.factionId=ranger.factionId;s.armies[0]!.factionId=ranger.factionId;
+  s.units[0]=createUnit(ranger,'unit-1','player-1',Array.from({length:ranger.modelCount},(_,i)=>({x:5+i*1.5,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:16+i*1.5,y:6});
+  const e=engine(s);pass(e);
+  ok(e.beginMovement('unit-2'));ok(e.moveModel(e.getState().units[1]!.models[0]!.id,{x:14.5,y:6}));ok(e.completeMovement());
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_ENEMY_MOVE');
+  assert.equal(e.usePathOfTheOutcast('unit-2',()=>0).ok,false);
+  ok(e.usePathOfTheOutcast('unit-1',()=>.5));
+  assert.equal(e.getState().reactionMove?.allowance,4);
+  const before=e.getState();assert.equal(e.moveReactionModel(e.getState().units[0]!.models[0]!.id,{x:30,y:5}).ok,false);
+  assert.deepEqual(e.getState(),before);
+  ok(e.completeReactionMove());
+  assert.equal(e.usePathOfTheOutcast('unit-1',()=>0).ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];

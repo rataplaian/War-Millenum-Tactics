@@ -39,7 +39,7 @@ export const AELDARI_DATASHEETS: readonly UnitDefinition[] = [
     weapons: [ranged('destructor',12,dice(1),3,5,-1,1,['TORRENT','PSYCHIC']),shurikenPistol,witchblade(3)], abilities: [ability('RUNES_OF_FORTUNE'),ability('PSYCHIC_COMMUNION')],
     attachment: { role: 'SUPPORT', canLeadDatasheetIds: ['storm-guardians'] } }),
   define({ id: 'autarch', name: 'Autarch', faction: A, movement: 7, toughness: 3, save: 3, wounds: 4, leadership: 6, oc: 1, base: 32, invulnerable: 4, keywords: ['INFANTRY','CHARACTER','AELDARI','ASURYANI','GRENADES','AUTARCH'],
-    weapons: [{...shurikenPistol,skill:2},melee('star-glaive',4,2,6,-3,3)], abilities: [ability('SUPERLATIVE_STRATEGIST'),ability('PATH_OF_COMMAND')], attachment: { role: 'LEADER', canLeadDatasheetIds: ['dire-avengers'] } }),
+    weapons: [{...shurikenPistol,skill:2},melee('star-glaive',4,2,6,-3,3)], abilities: [{...ability('SUPERLATIVE_STRATEGIST'),whileLeading:true},ability('PATH_OF_COMMAND')], attachment: { role: 'LEADER', canLeadDatasheetIds: ['dire-avengers'] } }),
   define({ id: 'storm-guardians', name: 'Storm Guardians', faction: A, movement: 7, toughness: 3, save: 4, wounds: 1, leadership: 7, oc: 2, base: 28.5, keywords: ['INFANTRY','BATTLELINE','AELDARI','ASURYANI','GRENADES','GUARDIANS','STORM_GUARDIANS'],
     weapons: [shurikenPistol,close,ranged('guardian-flamer',12,dice(1),3,4,0,1,['ASSAULT','IGNORES_COVER','TORRENT']),ranged('guardian-fusion-gun',12,1,3,8,-4,dice(1),['ASSAULT',['MELTA',2]])], abilities: [ability('STORMBLADES'),ability('SERPENT_SHIELD'),ability('CREWED_PLATFORM')],
     profiles: [{ count: 6, role:'STORM_GUARDIAN', weaponIds: ['shuriken-pistol','close-combat-weapon'] },

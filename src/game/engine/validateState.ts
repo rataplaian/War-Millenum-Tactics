@@ -98,9 +98,9 @@ export function validateState(state: GameState): void {
   }
   if(state.reactionMove) {
     const tx=state.reactionMove,u=state.units.find(u=>u.id===tx.unitId);
-    if(!u || !onBattlefield(u) || u.playerId===state.activePlayerId || !['OPPORTUNITY_SEIZED','FADE_BACK'].includes(tx.source) ||
-      (tx.source==='OPPORTUNITY_SEIZED' ? state.phase!=='Movement' : state.phase!=='Shooting') ||
-      !Number.isInteger(tx.allowance) || tx.allowance<2 || tx.allowance>7 ||
+    if(!u || !onBattlefield(u) || u.playerId===state.activePlayerId || !['OPPORTUNITY_SEIZED','FADE_BACK','PATH_OF_THE_OUTCAST'].includes(tx.source) ||
+      (tx.source==='FADE_BACK' ? state.phase!=='Shooting' : state.phase!=='Movement') ||
+      !Number.isInteger(tx.allowance) || tx.allowance<(tx.source==='PATH_OF_THE_OUTCAST'?1:2) || tx.allowance>(tx.source==='PATH_OF_THE_OUTCAST'?6:7) ||
       tx.originals.length!==u.models.length || tx.originals.some(o=>!u.models.some(m=>m.id===o.modelId) || !isFinitePosition(o.position)) ||
       Object.entries(tx.used).some(([id,d])=>!u.models.some(m=>m.id===id)||!nonNegative(d)||d>tx.allowance+EPSILON)) throw new Error('Invalid reaction movement transaction');
   }

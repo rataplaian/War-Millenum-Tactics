@@ -33,6 +33,8 @@ const implemented = {
   TERRIFYING_CRESCENDO: 'GameEngine.useTerrifyingCrescendo',
   DOOM_SIREN: 'GameEngine.useDoomSiren',
   PATH_OF_COMMAND: 'stratagems.StratagemEngine',
+  SUPERLATIVE_STRATEGIST: 'content.rollStrategistDie',
+  PATH_OF_THE_OUTCAST: 'GameEngine.usePathOfTheOutcast',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

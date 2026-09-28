@@ -48,7 +48,7 @@ import { getDetectionRange, type DetectionRangePolicy, areasForModel, isModelHid
 import { shootingModifiers } from '../terrain/attackModifiers';
 import { elevation } from '../terrain/geometry';
 import { CloseCombatController } from './CloseCombatController';
-import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, chargeAllowance, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
+import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, chargeAllowance, unitDistance, engagedTargets, type ChargeExceptions } from '../rules/closeCombat';
 import type { CommandResult, GameState, GameEvent, MovementPath, Position, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
@@ -60,6 +60,7 @@ import { psychicCommunionBonus } from '../content/psychicCommunion';
 import { postShotHitTargets } from '../content/postShooting';
 import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
+import { rollStrategistDie } from '../content/strategist';
 import { validateTerrainPath } from '../terrain/movement';
 import { isFinitePosition, EPSILON } from '../utils/geometry';
 import { availableRangedWeapons, validateShooter, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
@@ -78,8 +79,8 @@ export class GameEngine {
   static create(initialState: GameState, policies: EnginePolicies = {}): GameEngine { return new GameEngine(initialState, policies); }
   loadMatch(snapshot: GameState): void { validateState(snapshot); this.state = copy(snapshot); }
   getState(): GameState { return copy(this.state); }
-  useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource) {
-    return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng));
+  useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource, reroll = false) {
+    return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng,reroll));
   }
   activateEuphoricStrikes(unitId:string):CommandResult {
     return this.flowCommand(s=>{
@@ -172,6 +173,23 @@ export class GameEngine {
       return {ok:true,value:undefined};
     });
   }
+  /** Optional 11e Rangers reaction, sharing the spatial reaction transaction. */
+  usePathOfTheOutcast(unitId:string,rng:RandomSource):CommandResult {
+    return this.flowCommand(s=>{
+      const u=s.units.find(x=>x.id===unitId),moved=s.units.find(x=>x.id===s.flow?.window?.unitId);
+      const stamp=`PATH_OF_THE_OUTCAST:${s.flow?.window?.id}:${unitId}`;
+      if(!u || !moved || !s.flow || s.flow.window?.trigger!=='AFTER_ENEMY_MOVE' || s.flow.resolvedAbilities.includes(stamp) || s.phase!=='Movement' ||
+        u.playerId===s.activePlayerId || moved.playerId!==s.activePlayerId || !u.models.some(m=>m.alive) ||
+        !sourceAbilities(s,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST') ||
+        unitDistance(u,moved)>8+EPSILON || engagedTargets(s,u).length || s.reactionMove || !rng) return failure('UNIT_NOT_ELIGIBLE');
+      const roll=rollD6(rng);
+      s.reactionMove={unitId,source:'PATH_OF_THE_OUTCAST',allowance:roll,
+        originals:u.models.map(m=>({modelId:m.id,position:{...m.position}})),used:{}};
+      s.flow.resolvedAbilities.push(stamp);
+      flowEvent(s,'REACTION_MOVE_STARTED',{source:'PATH_OF_THE_OUTCAST',roll,allowance:roll},unitId,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
 
   /** Legacy Task 001 helpers. New UI commands use tryNextPhase/tryNextTurn results. */
   nextPhase(): GameState {
@@ -225,11 +243,13 @@ export class GameEngine {
     const result = validateBeginMovement(this.state, unitId, moveType);
     if (!result.ok) return result;
     if (!validateMovementAbilities(this.state, result.value, abilityChoices)) return failure('INVALID_ABILITY_CHOICE');
+    if (abilityChoices.rerollAdvance && (moveType !== 'ADVANCE_MOVE' || effectiveFlag(this.state,unitId,'FIXED_ADVANCE_SIX'))) return failure('INVALID_ABILITY_CHOICE');
     if (moveType !== 'NORMAL_MOVE') {
       const draft = this.getState(), unit = draft.units.find(u => u.id === unitId)!;
       const fixedAdvance=moveType==='ADVANCE_MOVE' && effectiveFlag(draft,unitId,'FIXED_ADVANCE_SIX');
       if (!rng && (moveType === 'ADVANCE_MOVE' && !fixedAdvance || !fallBackOptions(draft, unit).orderedRetreat && moveType==='FALL_BACK_MOVE')) return failure('INVALID_CONFIGURATION');
-      const bonus = moveType === 'ADVANCE_MOVE' ? fixedAdvance ? 6 : rollD6(rng!) : 0;
+      const advanceRoll = moveType === 'ADVANCE_MOVE' && !fixedAdvance && abilityChoices.rerollAdvance ? rollStrategistDie(rng!,true) : undefined;
+      const bonus = moveType === 'ADVANCE_MOVE' ? fixedAdvance ? 6 : advanceRoll?.value ?? rollD6(rng!) : 0;
       const desperate = moveType === 'FALL_BACK_MOVE' && !fallBackOptions(draft, unit).orderedRetreat;
       if (desperate) {
         const hazard = resolveHazardRolls(draft, unit, unit.models.filter(m => m.alive).length, rng!);
@@ -242,7 +262,7 @@ export class GameEngine {
         }
       }
       draft.movement = { unitId, abilityChoices: copy(abilityChoices), moveType, bonus, desperate, irreversible: moveType === 'ADVANCE_MOVE' || desperate, originals: unit.models.map(m => ({ modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
-      if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus }, unitId); }
+      if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus, ...(advanceRoll ? {initial:advanceRoll.initial,rerolled:advanceRoll.wasRerolled,source:'SUPERLATIVE_STRATEGIST'} : {}) }, unitId); }
       this.commit(draft); this.event(unitId, { type: 'movement-started' }); return { ok: true, value: undefined };
     }
     this.state.movement = { unitId, abilityChoices: copy(abilityChoices), originals: result.value.models.map(m => ({
@@ -312,6 +332,10 @@ export class GameEngine {
     if (draft.movement!.abilityChoices?.mobile) { const roll = rollD6(rng!); if (roll === 1) moved.state.battleShocked = true; flowEvent(draft, 'SUPER_HEAVY_WALKER_TEST', { roll }, moved.id); }
     draft.movement = null;
     draft.events.push({ type: 'movement-completed', unitId: unit.id, playerId: unit.playerId, turn: draft.turn, round: draft.round, sequence: draft.events.length + 1 });
+    if (draft.flow && draft.units.some(u=>u.playerId!==moved.playerId &&
+      sourceAbilities(draft,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST') &&
+      u.models.some(m=>m.alive) && unitDistance(u,moved)<=8+EPSILON && !engagedTargets(draft,u).length))
+      openWindow(draft,'AFTER_ENEMY_MOVE',{unitId:moved.id});
     if (moveType === 'FALL_BACK_MOVE' && draft.flow && draft.units.some(u => u.playerId !== moved.playerId && (hasFactionRule(draft,u,'BATTLE_FOCUS') &&
         draft.factionHistory?.engagedAtPhaseStart?.[u.id]?.includes(moved.id) || draft.stratagemDefinitions?.some(d=>d.id==='CUT_DOWN_THE_WEAK') && unitKeywords(draft,u).includes('EMPERORS_CHILDREN')))) openWindow(draft,'AFTER_ENEMY_FALL_BACK',{unitId:moved.id});
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);

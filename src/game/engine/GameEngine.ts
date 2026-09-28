@@ -77,6 +77,22 @@ export class GameEngine {
   useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource) {
     return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng));
   }
+  /** Guide targets a visible enemy at the end of the Aeldari player's Movement phase. */
+  useGuide(unitId:string,targetId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.phase!=='Movement'||s.flow?.window?.trigger!=='END_OF_PHASE'||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId),target=s.units.find(u=>u.id===targetId);
+      if(!unit||!target||unit.playerId!==s.activePlayerId||target.playerId===unit.playerId||!onBattlefield(unit)||!onBattlefield(target))return failure('INVALID_TARGET');
+      const seers=unit.models.filter(m=>m.alive&&modelDefinition(s,unit,m).abilities.some(a=>a.id==='GUIDE'));
+      if(!seers.length)return failure('UNIT_NOT_ELIGIBLE');
+      if(s.flow.effects.some(e=>e.source===`GUIDE:${unit.playerId}`&&e.target.unitId===targetId&&e.createdAt.turn===s.turn))return failure('USAGE_LIMIT');
+      const provider=this.policies.visibilityProvider?.(s)??createVisibilityProvider(s,this.policies.detectionRange??getDetectionRange,this.policies.visibility);
+      if(!seers.some(m=>target.models.some(n=>n.alive&&edgeDistance(m,n)<=18+EPSILON)&&provider.isUnitVisible(m,target)))return failure('INVALID_TARGET');
+      applyEffect(s,{source:`GUIDE:${unit.playerId}`,target:{unitId:targetId},payload:{kind:'FLAG',flag:'GUIDED',value:true},
+        expiry:'START_OF_NEXT_COMMAND_PHASE',expiryPlayerId:unit.playerId,stacking:'REPLACE_SAME_SOURCE'});
+      return {ok:true,value:undefined};
+    });
+  }
   moveReactionModel(modelId:string,target:Position,path?:MovementPath): CommandResult {
     return this.flowCommand(s=>{
       const tx=s.reactionMove;

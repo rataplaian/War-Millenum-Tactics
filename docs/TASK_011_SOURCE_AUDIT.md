@@ -24,6 +24,10 @@ Rangers have a ranged-only invulnerable save, represented separately from their 
 
 The selected Emperor's Children Lord Exultant default loadout now includes its close combat weapon; Sorcerer witchfire and force weapon damage are D3. The selected leaders carry the relevant generic GRENADES, CHAOS and SLAANESH keywords. Unselected alternative equipment and remaining datasheet abilities still require verification and implementation.
 
+Lord Exultant's Perfectionists and Lord Kakophonist's Obsessive Annunciation now contribute Lethal Hits and ranged Sustained Hits 1 respectively through the same source-aware AttackContext used by other attached-unit rules. Tests resolve critical attacks and verify the effect disappears when its leader is no longer alive.
+
+Farseer Guide now selects a visible enemy within 18 inches at the end of the Movement phase. A temporary effect marks the target until the start of the Aeldari player's next Command phase; the common Hit resolution grants +1 only to friendly Aeldari attacks against that target, without editing weapons or enemy datasheets.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

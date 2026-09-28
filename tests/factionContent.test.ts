@@ -8,6 +8,7 @@ import { VERIFIED_MUSTER_ENTRIES } from '../src/game/content/verifiedEntries';
 import { createAttackJob, runAttackJob } from '../src/game/combat/AttackPipeline';
 import { createTestMatch } from '../src/game/data/prototype';
 import { factionAttackWeapon } from '../src/game/content/attackAbilities';
+import { expireEffects } from '../src/game/effects/EffectEngine';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -104,6 +105,53 @@ test('Emperor’s Children chosen leader weapons preserve D3 damage and the defa
   const exultant=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-exultant')!;
   assert.deepEqual(exultant.weapons.map(w=>w.id),['bolt-pistol','plasma-pistol','phoenix-power-spear','lord-close-combat-weapon']);
   assert.ok(exultant.keywords.includes('SLAANESH'));
+});
+test('attached leaders grant Perfectionists and Obsessive Annunciation only while leading', () => {
+  const s=createAeldariVsEmperorsChildrenMatch(4);
+  const target=s.units.find(u=>u.id==='storm-council')!,infractors=s.units.find(u=>u.id==='infractor-command')!,noise=s.units.find(u=>u.id==='noise-command')!;
+  for(const unit of [target,infractors,noise]) unit.location='BATTLEFIELD';
+  target.models.forEach((m,i)=>m.position={x:10+i,y:15});
+  infractors.models.forEach((m,i)=>m.position={x:10+i,y:13});
+  noise.models.forEach((m,i)=>m.position={x:10+i,y:9});
+  const weapon=(u:typeof infractors,id:string)=>s.definitions.find(d=>d.id===u.definitionId)!.weapons.find(w=>w.id===id)!;
+  const targetDefinition=s.definitions.find(d=>d.id===target.definitionId)!;
+  const melee=weapon(infractors,'infractors:duelling-sabre'),infantry=infractors.models.find(m=>m.sourceDefinitionId==='infractors')!;
+  const first=createAttackJob(melee,[infantry.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(first.contexts[0]!.abilities.some(a=>a.type==='LETHAL_HITS'&&a.source==='PERFECTIONISTS'),true);
+  runAttackJob(first,()=>.99,s);
+  assert.equal(first.resolution.attackRecords?.[0]?.automaticallyWoundedFromCriticalHit,true);
+  const sonic=weapon(noise,'noise-marines:sonic-blaster'),marine=noise.models.find(m=>m.sourceDefinitionId==='noise-marines')!;
+  const second=createAttackJob(sonic,[marine.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(second.contexts[0]!.abilities.some(a=>a.type==='SUSTAINED_HITS'&&a.source==='OBSESSIVE_ANNUNCIATION'),true);
+  runAttackJob(second,()=>.99,s);
+  assert.equal(second.resolution.attackRecords?.[0]?.generatedAdditionalHits,1);
+  const kakophonist=noise.models.find(m=>m.sourceDefinitionId==='lord-kakophonist')!;
+  kakophonist.alive=false;kakophonist.woundsRemaining=0;
+  const without=createAttackJob(sonic,[marine.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(without.contexts[0]!.abilities.some(a=>a.source==='OBSESSIVE_ANNUNCIATION'),false);
+});
+test('Guide selects a visible target only at Movement end and improves allied Aeldari Hit rolls until next Command', async () => {
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const s=createTestMatch(),farseer={...AELDARI_DATASHEETS.find(d=>d.id==='farseer')!,attachment:undefined};
+  s.phase='Movement';s.definitions=[farseer,s.definitions[1]!];
+  s.players[0]!.factionId=farseer.factionId;s.armies[0]!.factionId=farseer.factionId;
+  s.units[0]=createUnit(farseer,'unit-1','player-1',[{x:4,y:4}]);
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+  const e=engine(s);pass(e);
+  const before=e.getState();assert.equal(e.useGuide('unit-1','unit-2').ok,false);assert.deepEqual(e.getState(),before);
+  ok(e.tryNextPhase());
+  ok(e.useGuide('unit-1','unit-2'));
+  const guided=e.getState();
+  assert.equal(guided.flow?.effects.some(x=>x.source==='GUIDE:player-1'&&x.target.unitId==='unit-2'&&x.active),true);
+  assert.equal(e.useGuide('unit-1','unit-2').ok,false);
+  assert.deepEqual(new GameEngine(guided).getState(),guided);
+  const weapon=farseer.weapons.find(w=>w.id==='eldritch-storm')!,unit=guided.units[0]!,target=guided.units[1]!;
+  const job=createAttackJob(weapon,[unit.models[0]!.id],target,guided.definitions[1]!,()=>.01,[],guided);
+  runAttackJob(job,()=>.2,guided);
+  assert.equal(job.resolution.attackRecords?.[0]?.modifiers.some(m=>m.source==='GUIDE'),true);
+  assert.equal(job.resolution.attackRecords?.[0]?.hitSucceeded,true);
+  guided.turn=3;guided.activePlayerId='player-1';expireEffects(guided,'COMMAND_START');
+  assert.equal(guided.flow?.effects.find(x=>x.source==='GUIDE:player-1')?.active,false);
 });
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;

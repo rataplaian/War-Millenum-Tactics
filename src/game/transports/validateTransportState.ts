@@ -16,6 +16,7 @@ export function validateTransportState(s: GameState): void {
     }
     if (d.attachment) check(['LEADER', 'SUPPORT'].includes(d.attachment.role) && d.attachment.canLeadDatasheetIds.every(id => s.definitions.some(x => x.id === id && !x.attachment)), 'attachment compatibility');
     check(d.invulnerableSave === undefined || (Number.isInteger(d.invulnerableSave) && d.invulnerableSave >= 2 && d.invulnerableSave <= 7), 'invulnerable save');
+    check(d.invulnerableSaveRanged === undefined || (Number.isInteger(d.invulnerableSaveRanged) && d.invulnerableSaveRanged >= 2 && d.invulnerableSaveRanged <= 7), 'ranged invulnerable save');
   }
   for (const u of s.units) {
     if (u.location === 'EMBARKED') {

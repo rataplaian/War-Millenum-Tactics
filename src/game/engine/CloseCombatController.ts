@@ -11,7 +11,7 @@ import { rollD6s, type RandomSource } from '../utils/dice';
 import { centreDistance, edgeDistance, EPSILON, isFinitePosition } from '../utils/geometry';
 import { definitionFor, failure, validateFinalPosition } from '../rules/movement';
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
-import { canDeclareCharge, COMBAT_RULES, emptyCloseCombat, engagedTargets, enemies, findChargeFormation, getModelsEligibleToFight, living, reachablePositions, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
+import { canDeclareCharge, chargeAllowance, COMBAT_RULES, emptyCloseCombat, engagedTargets, enemies, findChargeFormation, getModelsEligibleToFight, living, reachablePositions, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
 import { eligibleFighters, nextFightSelection, otherPlayer } from '../rules/FightSequenceController';
 import { hasFactionRule, recordFactionTarget, thrillTargetLegal } from '../content/factionRules';
 import { flowEvent } from '../flow/events';
@@ -54,13 +54,15 @@ export class CloseCombatController {
     if (!charge) return failure('NO_CHARGE');
     if (this.combat.move) return failure('COMBAT_IN_PROGRESS');
     if (!targetIds.length || new Set(targetIds).size !== targetIds.length) return failure('TARGETS_REQUIRED');
-    const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => thrillTargetLegal(this.state,this.unit(charge.unitId),target.id) && unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance, charge.distance) + EPSILON);
+    const allowance = chargeAllowance(this.state,charge.rolls.reduce((sum,roll)=>sum+roll,0),targetIds);
+    const legal = enemies(this.state, this.unit(charge.unitId)).filter(target => thrillTargetLegal(this.state,this.unit(charge.unitId),target.id) && unitDistance(this.unit(charge.unitId), target) <= Math.min(COMBAT_RULES.chargeTargetDistance,allowance) + EPSILON);
     const reaction=this.combat.reaction;
     if (targetIds.some(id => !legal.some(u => u.id === id)) ||
         (reaction?.targetUnitId && !targetIds.includes(reaction.targetUnitId)) ||
         (reaction?.mode==='LEAP_TO_DEFEND' && targetIds.some(id=>!this.unit(id).state.hasCharged)) ||
         (reaction?.mode==='INTO_THE_FRAY' && targetIds.some(id=>unitDistance(this.unit(charge.unitId),this.unit(id))>6+EPSILON))) return failure('UNREACHABLE_TARGET');
-    if (!findChargeFormation(this.state, this.unit(charge.unitId), targetIds, charge.distance)) return failure('UNREACHABLE_TARGET');
+    if (!findChargeFormation(this.state, this.unit(charge.unitId), targetIds, allowance)) return failure('UNREACHABLE_TARGET');
+    charge.distance = allowance;
     charge.targetIds = [...targetIds];
     recordFactionTarget(this.state,'chargedByPhase',charge.unitId,targetIds);
     this.emit(charge.unitId, { type: 'charge-target-selected', targetIds: [...targetIds] });

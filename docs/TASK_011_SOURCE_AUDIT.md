@@ -18,6 +18,12 @@ The updated Emperor's Children total is Lord Exultant 90, Sorcerer 55, Lord Kako
 
 The Farseer Eldritch Storm now rolls D3 damage; Farseer and Warlock Witchblades use Anti-Infantry 2+. Fire Dragons' Assured Destruction now grants optional Hit, Wound and Damage reroll permissions against Monster/Vehicle targets through a temporary weapon view, checked before dice and persisted in a paused attack snapshot. Guardian flamers now include their Assault and Ignores Cover abilities. These targeted corrections do not constitute a completed audit of every selected datasheet or its abilities.
 
+Warlock Runes of Fortune now reduces a charge's rolled allowance by 2 when at least one selected target has the ability. The target preview, final formation check, and snapshot validation all apply the same post-roll adjustment once; the event retains the original 2D6 result. The existing Into the Fray maximum is applied after this adjustment.
+
+Rangers have a ranged-only invulnerable save, represented separately from their normal save and applied only while resolving ranged attacks. The Wave Serpent's twin shuriken cannon now carries Twin-linked. These additions preserve existing Task 009 saves and source datasheets.
+
+The selected Emperor's Children Lord Exultant default loadout now includes its close combat weapon; Sorcerer witchfire and force weapon damage are D3. The selected leaders carry the relevant generic GRENADES, CHAOS and SLAANESH keywords. Unselected alternative equipment and remaining datasheet abilities still require verification and implementation.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

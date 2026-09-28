@@ -162,7 +162,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 throw Error('Invalid allocation');
             const d = s ? modelDefinition(s, j.target, m) : j.targetDefinition;
             const save = characteristic('SAVE', m.stats?.save ?? d.stats.save, j.target.id, m.id), ap = characteristic('AP', w.armourPenetration - (s && w.kind==='melee' && effectiveFlag(s,c.attackerUnitId,'MELEE_AP_BONUS') ? 1 : 0));
-            a.save = resolveSave(save, d.invulnerableSave, ap, rng, !!permission(w, 'SAVE') && j.choices.rerolls?.SAVE === 'FAILED');
+            a.save = resolveSave(save, w.kind === 'ranged' ? d.invulnerableSaveRanged ?? d.invulnerableSave : d.invulnerableSave, ap, rng, !!permission(w, 'SAVE') && j.choices.rerolls?.SAVE === 'FAILED');
             r.saveResults.push(a.save);
             if (a.save.saved) {
                 finish();

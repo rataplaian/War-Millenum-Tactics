@@ -5,7 +5,7 @@ import { createCloseCombatTestMatch } from '../src/game/data/closeCombatPrototyp
 import { createTestMatch } from '../src/game/data/prototype';
 import { createUnit } from '../src/game/engine/createUnit';
 import type { CommandResult, FailureReason, GameState } from '../src/game/models';
-import { canDeclareCharge, emptyCloseCombat, getModelsEligibleToFight } from '../src/game/rules/closeCombat';
+import { canDeclareCharge, chargeAllowance, emptyCloseCombat, getModelsEligibleToFight } from '../src/game/rules/closeCombat';
 import { nextFightSelection } from '../src/game/rules/FightSequenceController';
 import { baseRadius } from '../src/game/utils/geometry';
 import { dice } from './shooting.helpers';
@@ -53,6 +53,33 @@ test('charge roll consumes exactly two controlled D6 and records them', () => {
   const game = chargeGame(), rng = dice(2, 5); assert.deepEqual(game.declareCharge('unit-1', rng.rng), { ok: true, value: 7 });
   assert.equal(rng.calls(), 2); const event = game.getState().events[1]; assert.equal(event?.type, 'charge-rolled');
   if (event?.type === 'charge-rolled') assert.deepEqual(event.rolls, [2, 5]);
+});
+test('Runes of Fortune reduces the rolled charge once after target selection and updates legal target previews', () => {
+  const game = chargeGame(s=>{s.definitions=s.definitions.map((d,i)=>i===1?{...d,abilities:[...d.abilities,{id:'RUNES_OF_FORTUNE',name:'Runes of Fortune',parameters:{}}]}:d);});
+  ok(game.declareCharge('unit-1',dice(3,4).rng));
+  assert.equal(game.getState().closeCombat?.charge?.distance,7);
+  assert.equal(game.getLegalChargeTargets().some(u=>u.id==='unit-2'),true);
+  ok(game.selectChargeTargets(['unit-2']));
+  assert.equal(game.getState().closeCombat?.charge?.distance,5);
+  assert.deepEqual(game.getState().closeCombat?.charge?.rolls,[3,4]);
+  assert.equal(game.getState().closeCombat?.move?.allowance,5);
+  assert.deepEqual(new GameEngine(game.getState()).getState(),game.getState());
+});
+test('a charge target beyond its modified allowance leaves the unspent roll and formation untouched', () => {
+  const game = chargeGame(s=>{s.definitions=s.definitions.map((d,i)=>i===1?{...d,abilities:[...d.abilities,{id:'RUNES_OF_FORTUNE',name:'Runes of Fortune',parameters:{}}]}:d);
+    s.units[1]!.models.forEach(m=>{m.position.y+=2;});});
+  ok(game.declareCharge('unit-1',dice(3,4).rng));
+  assert.deepEqual(game.getLegalChargeTargets(),[]);
+  rejected(game,()=>game.selectChargeTargets(['unit-2']),'UNREACHABLE_TARGET');
+  assert.equal(game.getState().closeCombat?.charge?.distance,7);
+});
+test('multiple Runes targets apply one penalty before the generic Into the Fray cap', () => {
+  const s=createCloseCombatTestMatch();
+  s.definitions=s.definitions.map((d,i)=>i===1?{...d,abilities:[{id:'RUNES_OF_FORTUNE',name:'Runes of Fortune',parameters:{}}]}:d);
+  addEnemy(s);
+  assert.equal(chargeAllowance(s,10,['unit-2','unit-3']),8);
+  s.closeCombat={...emptyCloseCombat(),reaction:{unitId:'unit-1',source:'HEROIC_INTERVENTION',mode:'INTO_THE_FRAY'}};
+  assert.equal(chargeAllowance(s,10,['unit-2','unit-3']),6);
 });
 test('broken charge RNG throws without partial state mutation', () => {
   const game = chargeGame(), before = game.getState(); assert.throws(() => game.declareCharge('unit-1', dice(3).rng)); assert.deepEqual(game.getState(), before);

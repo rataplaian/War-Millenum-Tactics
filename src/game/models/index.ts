@@ -65,7 +65,7 @@ export interface UnitStats { movement: number; toughness: number; save: number; 
 export type UnitDefinition = DeepReadonly<{
   id: string; name: string; factionId: FactionId; modelCount: number; stats: UnitStats;
   modelProfiles?: { count: number; base?: BaseGeometry; stats?: Partial<UnitStats>; weaponIds: string[]; coreAbilities?: CoreAbility[] }[];
-  attachment?: AttachmentDefinition; transport?: TransportCapacityDefinition; invulnerableSave?: number;
+  attachment?: AttachmentDefinition; transport?: TransportCapacityDefinition; invulnerableSave?: number; invulnerableSaveRanged?: number;
   points?: number; coreAbilities?: CoreAbility[];
   defaultBase: BaseGeometry;
   keywords: string[]; weapons: Weapon[]; abilities: Ability[]; placeholder: boolean;

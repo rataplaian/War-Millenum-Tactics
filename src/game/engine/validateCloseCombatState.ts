@@ -3,7 +3,7 @@ import { centreDistance } from '../utils/geometry';
 import { historicalUnit } from '../attachments/queries';
 import type { GameState } from '../models';
 import { baseInsideBattlefield, distanceTravelled, EPSILON, isFinitePosition } from '../utils/geometry';
-import { COMBAT_RULES } from '../rules/closeCombat';
+import { chargeAllowance, COMBAT_RULES } from '../rules/closeCombat';
 import { effectiveFlag } from '../effects/EffectEngine';
 /** Task 003 snapshots without this optional extension remain loadable. */
 export function validateCloseCombatState(state: GameState): void {
@@ -19,9 +19,10 @@ export function validateCloseCombatState(state: GameState): void {
   if (combat.charge) {
     const charge = combat.charge, source = unit(charge.unitId);
     require(state.status === 'in-progress' && (combat.reaction ? combat.reaction.unitId===charge.unitId && source?.playerId!==state.activePlayerId : state.phase === 'Charge' && source?.playerId === state.activePlayerId) && combat.declared.includes(charge.unitId), 'charge owner/phase');
-    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === (combat.reaction?.mode==='INTO_THE_FRAY' ? Math.min(6,charge.rolls.reduce((a,b)=>a+b,0)) : charge.rolls.reduce((a, b) => a + b, 0)), 'charge roll');
+    const raw = charge.rolls.reduce((a,b)=>a+b,0);
+    require(charge.rolls.length === 2 && charge.rolls.every(r => Number.isInteger(r) && r >= 1 && r <= 6) && charge.distance === chargeAllowance(state,raw,charge.targetIds), 'charge roll');
     require(ids(charge.targetIds) && charge.targetIds.every(id => unit(id)!.playerId !== source!.playerId), 'charge targets');
-    require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === charge.distance && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
+    require(state.events.some(e => e.type === 'charge-rolled' && e.unitId === charge.unitId && e.turn === state.turn && e.distance === chargeAllowance(state,raw,[]) && e.rolls.every((r, i) => r === charge.rolls[i])), 'missing roll event');
   }
   const fight = combat.fight;
   if (fight) {

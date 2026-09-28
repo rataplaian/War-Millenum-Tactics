@@ -47,7 +47,7 @@ import { getDetectionRange, type DetectionRangePolicy, areasForModel, isModelHid
 import { shootingModifiers } from '../terrain/attackModifiers';
 import { elevation } from '../terrain/geometry';
 import { CloseCombatController } from './CloseCombatController';
-import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
+import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, chargeAllowance, unitDistance, type ChargeExceptions } from '../rules/closeCombat';
 import type { CommandResult, GameState, GameEvent, MovementPath, Position, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
@@ -485,10 +485,11 @@ export class GameEngine {
     const charge = this.state.closeCombat?.charge;
     if (!charge || this.state.closeCombat?.move) return [];
     const source=this.state.units.find(u=>u.id===charge.unitId)!,reaction=this.state.closeCombat?.reaction;
-    const candidates=getLegalChargeTargets(this.state, source, charge.distance);
+    const raw=charge.rolls.reduce((sum,roll)=>sum+roll,0);
+    const candidates=getLegalChargeTargets(this.state, source, raw);
     if(reaction?.targetUnitId && !candidates.some(u=>u.id===reaction.targetUnitId)) return [];
     return copy(candidates.filter(u=>
-      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],charge.distance)) &&
+      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],chargeAllowance(this.state,raw,[reaction.targetUnitId,u.id]))) &&
       (reaction?.mode!=='LEAP_TO_DEFEND' || u.state.hasCharged) &&
       (reaction?.mode!=='INTO_THE_FRAY' || unitDistance(source,u)<=6+EPSILON)));
   }

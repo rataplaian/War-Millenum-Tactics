@@ -80,6 +80,31 @@ test('an invalid Assured Destruction target rejects the selected reroll before a
   ok(eligible.fireWeapon('dragon-fusion-gun','unit-2',()=>{called=true;return .99;}));
   assert.equal(called,true);
 });
+test('Rangers use their 5+ invulnerable save against ranged attacks only', () => {
+  const s=createTestMatch(),rangers=AELDARI_DATASHEETS.find(d=>d.id==='rangers')!;
+  s.definitions=[s.definitions[0]!,rangers];
+  const target=createUnit(rangers,'unit-2','player-2',Array.from({length:5},(_,i)=>({x:3+i*1.5,y:12})));
+  s.units[1]=target;
+  const base=s.definitions[0]!.weapons[0]!;
+  const ranged={...base,attacks:{kind:'fixed' as const,value:1},strength:10,armourPenetration:-3};
+  const shot=createAttackJob(ranged,[s.units[0]!.models[0]!.id],target,rangers,()=>.75,[],s);
+  runAttackJob(shot,()=>.75,s);
+  assert.equal(shot.resolution.saveResults[0]?.selected,'INVULNERABLE');
+  assert.equal(shot.resolution.saveResults[0]?.saved,true);
+  const sword={...ranged,kind:'melee' as const,range:null};
+  const strike=createAttackJob(sword,[s.units[0]!.models[0]!.id],target,rangers,()=>.75,[],s);
+  runAttackJob(strike,()=>.75,s);
+  assert.equal(strike.resolution.saveResults[0]?.selected,'ARMOUR');
+  assert.equal(strike.resolution.saveResults[0]?.saved,false);
+});
+test('Emperor’s Children chosen leader weapons preserve D3 damage and the default Lord loadout', () => {
+  const sorcerer=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='sorcerer')!;
+  for(const id of ['agonising-energies','force-weapon']) assert.deepEqual(sorcerer.weapons.find(w=>w.id===id)?.damage,
+    {kind:'dice',count:1,sides:3,modifier:0});
+  const exultant=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-exultant')!;
+  assert.deepEqual(exultant.weapons.map(w=>w.id),['bolt-pistol','plasma-pistol','phoenix-power-spear','lord-close-combat-weapon']);
+  assert.ok(exultant.keywords.includes('SLAANESH'));
+});
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
   const u=createUnit(storm,'storm','p',Array.from({length:11},(_,i)=>({x:i,y:0})));

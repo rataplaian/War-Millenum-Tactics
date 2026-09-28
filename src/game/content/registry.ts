@@ -31,6 +31,7 @@ const implemented = {
   LORD_HOST: 'deployment.abilitiesFor',
   EUPHORIC_STRIKES: 'GameEngine.activateEuphoricStrikes',
   TERRIFYING_CRESCENDO: 'GameEngine.useTerrifyingCrescendo',
+  DOOM_SIREN: 'GameEngine.useDoomSiren',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

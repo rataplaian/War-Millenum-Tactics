@@ -484,6 +484,25 @@ test('Terrifying Crescendo selects one hit target after Shooting and expires at 
   assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),8);
   assert.equal(resolveBattleShockRoll(after,after.units[1]!,()=>.5).success,true);
 });
+test('Doom Siren rolls deterministic 3D6 after a hit, spills mortal wounds and tests Battle-shock',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const source={...EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-kakophonist')!,attachment:undefined},s=createTestMatch();
+  s.phase='Shooting';s.definitions=[source,{...s.definitions[1]!,keywords:['INFANTRY']}];
+  s.players[0]!.factionId=source.factionId;s.armies[0]!.factionId=source.factionId;
+  s.units[0]=createUnit(source,'unit-1','player-1',[{x:5,y:5}]);s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*2,y:10});
+  const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('screamer-pistol','unit-2'));pass(e);
+  ok(e.fireWeapon('screamer-pistol','unit-2',()=>.8));ok(e.completeShooting());
+  const before=e.getState();let called=false;
+  assert.equal(e.useDoomSiren('unit-1','unit-1',()=>{called=true;return .9;}).ok,false);
+  assert.equal(called,false);assert.deepEqual(e.getState(),before);
+  const sequence=[.51,.17,.99,.01,.01];let next=0;
+  const result=ok(e.useDoomSiren('unit-1','unit-2',()=>sequence[next++]??.01));
+  assert.deepEqual(result.rolls,[4,2,6]);assert.equal(result.mortalWounds,2);
+  assert.equal(e.getState().units[1]!.state.battleShocked,true);
+  assert.equal(e.getState().events.some(x=>x.type==='flow'&&x.name==='DOOM_SIREN_RESOLVED'),true);
+  assert.equal(e.useDoomSiren('unit-1','unit-2',()=>.99).ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
 test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;
   unit.location='BATTLEFIELD';unit.models.filter(m=>m.componentUnitId==='storm-guardians').forEach(m=>{m.alive=false;m.woundsRemaining=0;});

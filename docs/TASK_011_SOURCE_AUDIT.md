@@ -50,6 +50,8 @@ Euphoric Strikes is an explicit start-of-Fight command, limited to one use per b
 
 Terrifying Crescendo queries the last Shooting action's actual successful hits and lets its player select one surviving enemy unit during the post-shot timing window. A serializable Leadership penalty then affects Leadership and Battle-shock tests until the beginning of that player's next Shooting phase. This introduced a generic Shooting-phase expiry point without modifying Match Flow for a specific datasheet.
 
+Doom Siren reuses that post-shot hit history for an Infantry-only selection. Its optional engine command rolls three injected D6, resolves mortal wounds through the central damage handler, then calls the existing Battle-shock resolver only when wounds were actually lost. Invalid targets never consume random values; usage and rolls are recorded in the event log.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

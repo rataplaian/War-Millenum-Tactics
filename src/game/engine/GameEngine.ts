@@ -20,7 +20,8 @@ import { TransportController, embark, detectDestroyedTransports } from '../trans
 import { passengers, remainingTransportCapacity, capacityDefinition } from '../transports/capacity';
 import { selectFiringDeck, firingDeckOptions } from '../transports/FiringDeck';
 import { resolveHazardRolls } from '../transports/HazardRoll';
-import { rollD6 } from '../utils/dice';
+import { rollD6, rollD6s } from '../utils/dice';
+import { resolveMortalWounds } from '../combat/damage';
 import { resolveBattleShockRoll } from '../command/BattleShock';
 import { flowEvent } from '../flow/events';
 import { MatchFlowController, enableFlow } from '../flow/MatchFlowController';
@@ -105,6 +106,27 @@ export class GameEngine {
       applyEffect(s,{source,target:{unitId:targetId},payload:{kind:'MODIFIER',characteristic:'LEADERSHIP',value:1},
         expiry:'START_OF_NEXT_SHOOTING_PHASE',expiryPlayerId:unit.playerId,stacking:'REPLACE_SAME_SOURCE'});
       return {ok:true,value:undefined};
+    });
+  }
+  useDoomSiren(unitId:string,targetId:string,rng:RandomSource):CommandResult<{rolls:number[];mortalWounds:number}> {
+    return this.flowCommand(s=>{
+      if(s.flow?.window?.trigger!=='AFTER_UNIT_SHOT'||s.flow.window.unitId!==unitId||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!sourceAbilities(s,unit).some(entry=>entry.ability.id==='DOOM_SIREN'&&
+        unit.models.some(m=>m.alive&&(m.componentUnitId??unit.id)===entry.sourceUnitId)))return failure('UNIT_NOT_ELIGIBLE');
+      const target=postShotHitTargets(s,unit,'INFANTRY').find(enemy=>enemy.id===targetId);
+      if(!target)return failure('INVALID_TARGET');
+      const lastStart=s.events.reduce((latest,e,index)=>e.type==='shooting-started'&&e.unitId===unitId&&e.turn===s.turn?index:latest,-1);
+      if(s.events.slice(lastStart+1).some(e=>e.type==='flow'&&e.name==='DOOM_SIREN_RESOLVED'&&e.unitId===unitId))return failure('USAGE_LIMIT');
+      const rolls=rollD6s(3,rng),wounds=rolls.filter(die=>die>=4).length;
+      const result=resolveMortalWounds(s,target,wounds,rng);
+      flowEvent(s,'DOOM_SIREN_RESOLVED',{targetUnitId:target.id,rolls,mortalWounds:result.applied,modelsDestroyed:result.destroyedModelIds},unitId,unit.playerId);
+      if(result.applied>0&&target.models.some(m=>m.alive)){
+        const shock=resolveBattleShockRoll(s,target,rng);target.state.battleShocked=!shock.success;
+        flowEvent(s,'BATTLE_SHOCK_ROLL_RESOLVED',{rolls:shock.rolls,total:shock.total,success:shock.success,source:'DOOM_SIREN'},target.id,target.playerId);
+        if(!shock.success) openWindow(s,'AFTER_BATTLE_SHOCK_FAILED',{unitId:target.id,targetUnitId:target.id});
+      }
+      return {ok:true,value:{rolls,mortalWounds:result.applied}};
     });
   }
   /** Guide targets a visible enemy at the end of the Aeldari player's Movement phase. */

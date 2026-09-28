@@ -30,6 +30,7 @@ const implemented = {
   EXCESSIVE_ASSAULT: 'content.factionAttackWeapon',
   LORD_HOST: 'deployment.abilitiesFor',
   EUPHORIC_STRIKES: 'GameEngine.activateEuphoricStrikes',
+  TERRIFYING_CRESCENDO: 'GameEngine.useTerrifyingCrescendo',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

@@ -56,6 +56,7 @@ import { validateState } from './validateState';
 import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
 import { factionAttackWeapon } from '../content/attackAbilities';
 import { psychicCommunionBonus } from '../content/psychicCommunion';
+import { postShotHitTargets } from '../content/postShooting';
 import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { validateTerrainPath } from '../terrain/movement';
@@ -89,6 +90,20 @@ export class GameEngine {
       if(s.flow.effects.some(e=>e.source==='EUPHORIC_STRIKES'&&e.target.modelId===bearer.id))return failure('USAGE_LIMIT');
       for(const [characteristic,value] of [['ATTACKS',3],['AP',-1]] as const)
         applyEffect(s,{source:'EUPHORIC_STRIKES',target:{unitId,modelId:bearer.id},payload:{kind:'MODIFIER',characteristic,value},expiry:'END_OF_CURRENT_PHASE',stacking:'STACK'});
+      return {ok:true,value:undefined};
+    });
+  }
+  useTerrifyingCrescendo(unitId:string,targetId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.flow?.window?.trigger!=='AFTER_UNIT_SHOT'||s.flow.window.unitId!==unitId||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!sourceAbilities(s,unit).some(entry=>entry.ability.id==='TERRIFYING_CRESCENDO'&&
+        unit.models.some(m=>m.alive&&(m.componentUnitId??unit.id)===entry.sourceUnitId)))return failure('UNIT_NOT_ELIGIBLE');
+      if(!postShotHitTargets(s,unit).some(target=>target.id===targetId))return failure('INVALID_TARGET');
+      const source=`TERRIFYING_CRESCENDO:${unitId}:${s.turn}`;
+      if(s.flow.effects.some(effect=>effect.source===source))return failure('USAGE_LIMIT');
+      applyEffect(s,{source,target:{unitId:targetId},payload:{kind:'MODIFIER',characteristic:'LEADERSHIP',value:1},
+        expiry:'START_OF_NEXT_SHOOTING_PHASE',expiryPlayerId:unit.playerId,stacking:'REPLACE_SAME_SOURCE'});
       return {ok:true,value:undefined};
     });
   }

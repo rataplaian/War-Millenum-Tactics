@@ -35,6 +35,7 @@ export class MatchFlowController {
     resetBattleFocus(s); recordTurnEngagement(s); flowEvent(s, 'BATTLE_ROUND_STARTED'); flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); this.enterPhase();
   }
   private enterPhase() {
+    if(this.s.phase==='Shooting') expireEffects(this.s,'SHOOTING_START');
     if(this.s.phase==='Movement') recordMovementPhaseEngagement(this.s);
     flowEvent(this.s, 'PHASE_STARTED', { phase: this.s.phase }); openWindow(this.s, 'START_OF_PHASE');
     if (this.s.phase === 'Command') new CommandController(this.s, this.policies).enter('START_OF_COMMAND_PHASE');

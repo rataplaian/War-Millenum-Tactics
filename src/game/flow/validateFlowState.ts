@@ -40,7 +40,7 @@ export function validateFlowState(s: GameState) {
       (e.target.modelId && !s.units.find(u=>u.id===e.target.unitId)?.models.some(m=>m.id===e.target.modelId)) || !player(e.expiryPlayerId) || typeof e.active !== 'boolean' ||
       !integer(e.createdAt.turn, 1) || e.createdAt.turn > s.turn || !integer(e.createdAt.round, 1) || e.createdAt.round > s.round || !integer(e.createdAt.phaseIndex, 1) || e.createdAt.phaseIndex > f.phaseIndex || !player(e.createdAt.playerId) || !PHASES.includes(e.createdAt.phase) ||
       !['STACK', 'REPLACE_SAME_SOURCE', 'NON_STACKING', 'HIGHEST_ONLY'].includes(e.stacking) ||
-      !['END_OF_CURRENT_PHASE', 'END_OF_CURRENT_TURN', 'END_OF_BATTLE_ROUND', 'START_OF_NEXT_COMMAND_PHASE', 'END_OF_NEXT_COMMAND_PHASE', 'UNTIL_EXPLICITLY_REMOVED'].includes(e.expiry)) fail();
+      !['END_OF_CURRENT_PHASE', 'END_OF_CURRENT_TURN', 'END_OF_BATTLE_ROUND', 'START_OF_NEXT_COMMAND_PHASE', 'END_OF_NEXT_COMMAND_PHASE', 'START_OF_NEXT_SHOOTING_PHASE', 'UNTIL_EXPLICITLY_REMOVED'].includes(e.expiry)) fail();
     if (e.payload.kind === 'MODIFIER') {
       if (!['MOVE', 'CHARGE_ROLL', 'BS', 'WS', 'SAVE', 'LEADERSHIP', 'OC', 'HIT_ROLL', 'WOUND_ROLL', 'ATTACKS', 'DAMAGE', 'AP', 'STRENGTH'].includes(e.payload.characteristic) || !Number.isFinite(e.payload.value)) fail();
     } else if (e.payload.kind !== 'FLAG' || !e.payload.flag || typeof e.payload.value !== 'boolean') fail();

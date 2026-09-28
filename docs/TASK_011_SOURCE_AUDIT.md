@@ -48,6 +48,8 @@ Excessive Assault adds a wound reroll permission to Infractors' melee attack vie
 
 Euphoric Strikes is an explicit start-of-Fight command, limited to one use per battle. The effect engine now supports optional model-scoped targets so its Attacks and AP modifiers apply to the Lord Exultant bearer only, expire after the phase, and remain marked as used in a snapshot.
 
+Terrifying Crescendo queries the last Shooting action's actual successful hits and lets its player select one surviving enemy unit during the post-shot timing window. A serializable Leadership penalty then affects Leadership and Battle-shock tests until the beginning of that player's next Shooting phase. This introduced a generic Shooting-phase expiry point without modifying Match Flow for a specific datasheet.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

@@ -21,6 +21,8 @@ import { CommandController } from '../src/game/command/CommandController';
 import { psychicCommunionBonus } from '../src/game/content/psychicCommunion';
 import { validAttackChoices } from '../src/game/abilities/validation';
 import { abilitiesFor, allHave, scoutDistance } from '../src/game/deployment/abilities';
+import { postShotHitTargets } from '../src/game/content/postShooting';
+import { resolveBattleShockRoll } from '../src/game/command/BattleShock';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -459,6 +461,28 @@ test('Euphoric Strikes is optional, model scoped, once per battle and expires af
   assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5,modelId),5);
   assert.equal(new GameEngine(active).activateEuphoricStrikes('unit-1').ok,false);
   assert.equal(lord.weapons.find(w=>w.id==='phoenix-power-spear')?.attacks.kind,'fixed');
+});
+test('Terrifying Crescendo selects one hit target after Shooting and expires at the next own Shooting start',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const noise=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='noise-marines')!,s=createTestMatch();
+  s.phase='Shooting';s.definitions=[noise,s.definitions[1]!];s.players[0]!.factionId=noise.factionId;s.armies[0]!.factionId=noise.factionId;
+  s.definitions=[noise,{...s.definitions[1]!,stats:{...s.definitions[1]!.stats,leadership:8}}];
+  s.units[0]=createUnit(noise,'unit-1','player-1',Array.from({length:6},(_,i)=>({x:4+i*2,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+  const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('sonic-blaster','unit-2'));pass(e);
+  ok(e.fireWeapon('sonic-blaster','unit-2',()=>.55));ok(e.completeShooting());
+  assert.deepEqual(postShotHitTargets(e.getState(),e.getState().units[0]!).map(u=>u.id),['unit-2']);
+  assert.equal(e.useTerrifyingCrescendo('unit-1','unit-1').ok,false);
+  ok(e.useTerrifyingCrescendo('unit-1','unit-2'));
+  const after=e.getState();assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),9);
+  assert.equal(resolveBattleShockRoll(after,after.units[1]!,()=>.5).success,false);
+  assert.equal(e.useTerrifyingCrescendo('unit-1','unit-2').ok,false);
+  assert.deepEqual(new GameEngine(after).getState(),after);
+  after.turn=2;after.activePlayerId='player-2';expireEffects(after,'SHOOTING_START');
+  assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),9);
+  after.turn=3;after.activePlayerId='player-1';expireEffects(after,'SHOOTING_START');
+  assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),8);
+  assert.equal(resolveBattleShockRoll(after,after.units[1]!,()=>.5).success,true);
 });
 test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;

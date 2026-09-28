@@ -39,7 +39,7 @@ export function effectiveFlag(s: GameState, unitId: string, flag: string, fallba
   const found = activeEffects(s, unitId).filter(e => e.payload.kind === 'FLAG' && e.payload.flag === flag).at(-1);
   return found?.payload.kind === 'FLAG' ? found.payload.value : sourceFlag(s, unitId, flag) ?? fallback;
 }
-export type ExpiryPoint = 'PHASE_END' | 'TURN_END' | 'ROUND_END' | 'COMMAND_START' | 'COMMAND_END';
+export type ExpiryPoint = 'PHASE_END' | 'TURN_END' | 'ROUND_END' | 'COMMAND_START' | 'COMMAND_END' | 'SHOOTING_START';
 export function expireEffects(s: GameState, point: ExpiryPoint) {
   for (const e of s.flow?.effects ?? []) {
     if (!e.active) continue;
@@ -47,7 +47,8 @@ export function expireEffects(s: GameState, point: ExpiryPoint) {
     if ((point === 'PHASE_END' && e.expiry === 'END_OF_CURRENT_PHASE' && e.createdAt.phaseIndex <= s.flow!.phaseIndex) ||
       (point === 'TURN_END' && e.expiry === 'END_OF_CURRENT_TURN') || (point === 'ROUND_END' && e.expiry === 'END_OF_BATTLE_ROUND') ||
       (point === 'COMMAND_START' && e.expiry === 'START_OF_NEXT_COMMAND_PHASE' && nextCommand) ||
-      (point === 'COMMAND_END' && e.expiry === 'END_OF_NEXT_COMMAND_PHASE' && nextCommand)) removeEffect(s, e.id);
+      (point === 'COMMAND_END' && e.expiry === 'END_OF_NEXT_COMMAND_PHASE' && nextCommand) ||
+      (point === 'SHOOTING_START' && e.expiry === 'START_OF_NEXT_SHOOTING_PHASE' && nextCommand)) removeEffect(s, e.id);
   }
 }
 /** A dash is represented explicitly, rather than silently mutating the datasheet to zero. */

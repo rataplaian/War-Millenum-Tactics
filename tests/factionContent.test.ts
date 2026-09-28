@@ -7,6 +7,7 @@ import { AELDARI_PRESET, EMPERORS_CHILDREN_PRESET, createAeldariVsEmperorsChildr
 import { VERIFIED_MUSTER_ENTRIES } from '../src/game/content/verifiedEntries';
 import { createAttackJob, runAttackJob } from '../src/game/combat/AttackPipeline';
 import { createTestMatch } from '../src/game/data/prototype';
+import { factionAttackWeapon } from '../src/game/content/attackAbilities';
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
   const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
@@ -21,6 +22,63 @@ test('exactly nineteen sourced datasheets have selectable equipment and matching
     assert.equal(u.models.length,d.modelCount);
     assert.ok(u.models.every(m=>m.weaponIds===undefined || m.weaponIds.every(id=>d.weapons.some(w=>w.id===id))));
   }
+});
+test('Farseer storm rolls D3 damage and both Witchblades critically wound Infantry on 2+', () => {
+  const farseer=AELDARI_DATASHEETS.find(d=>d.id==='farseer')!;
+  const warlock=AELDARI_DATASHEETS.find(d=>d.id==='warlock')!;
+  assert.deepEqual(farseer.weapons.find(w=>w.id==='eldritch-storm')?.damage,{kind:'dice',count:1,sides:3,modifier:0});
+  for(const d of [farseer,warlock]) assert.deepEqual(d.weapons.find(w=>w.id==='witchblade')?.weaponAbilities?.find(a=>a.type==='ANTI'),
+    {id:'witchblade:anti-infantry',type:'ANTI',keyword:'INFANTRY',threshold:2});
+  const s=createTestMatch();
+  const bearer=createUnit(farseer,'unit-1','player-1',[{x:4,y:4}]);
+  s.definitions=[farseer,s.definitions[1]!];s.units[0]=bearer;
+  const target=s.units[1]!, weapon=farseer.weapons.find(w=>w.id==='witchblade')!;
+  const job=createAttackJob(weapon,[bearer.models[0]!.id],target,s.definitions[1]!,()=>.17,[],s);
+  runAttackJob(job,()=>.17,s);
+  assert.equal(job.resolution.attackRecords?.[0]?.criticalWound,true);
+  assert.deepEqual(weapon,farseer.weapons.find(w=>w.id==='witchblade'));
+});
+test('Assured Destruction grants optional rerolls only versus Monster or Vehicle without mutating the datasheet', () => {
+  const s=createTestMatch(), dragon=AELDARI_DATASHEETS.find(d=>d.id==='fire-dragons')!;
+  s.definitions=[dragon,s.definitions[1]!];
+  const unit=createUnit(dragon,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:5})));
+  s.units[0]=unit;
+  const base=dragon.weapons.find(w=>w.id==='dragon-fusion-gun')!;
+  const infantry=factionAttackWeapon(s,unit,base,s.units[1]!);
+  assert.equal(infantry,base);
+  s.definitions=s.definitions.map((d,i)=>i===1?{...d,keywords:['VEHICLE']}:d);
+  const attack=factionAttackWeapon(s,unit,base,s.units[1]!);
+  assert.deepEqual(attack.rerollPermissions?.map(p=>p.kind),['HIT','WOUND','DAMAGE']);
+  assert.equal(base.rerollPermissions,undefined);
+  const target=s.units[1]!;
+  const rolls=[0,.8,.8,.8,.8,.8,.8];let index=0;
+  const job=createAttackJob(attack,[unit.models[0]!.id],target,s.definitions[1]!,()=>rolls[index++]??.8,[],s,undefined,{rerolls:{HIT:'FAILED'}});
+  runAttackJob(job,()=>rolls[index++]??.8,s);
+  assert.equal(job.resolution.attackRecords?.[0]?.hit?.wasRerolled,true);
+  assert.equal(job.resolution.attackRecords?.[0]?.hit?.rerollSource,'ASSURED_DESTRUCTION');
+});
+test('an invalid Assured Destruction target rejects the selected reroll before any attack or state change', async () => {
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const s=createTestMatch(),dragons=AELDARI_DATASHEETS.find(d=>d.id==='fire-dragons')!;
+  s.phase='Shooting';s.definitions=[dragons,s.definitions[1]!];
+  s.players[0]!.factionId=dragons.factionId;s.armies[0]!.factionId=dragons.factionId;
+  s.units[0]=createUnit(dragons,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:11});
+  const e=engine(s);pass(e);
+  ok(e.beginShooting('unit-1'));
+  ok(e.setAttackChoices('dragon-fusion-gun',{rerolls:{HIT:'FAILED'}}));
+  const before=e.getState();let called=false;
+  const rejected=e.selectShootingTarget('dragon-fusion-gun','unit-2');
+  assert.equal(rejected.ok,false);
+  assert.equal(called,false);
+  assert.deepEqual(e.getState(),before);
+  const target=before.definitions.find(d=>d.id===before.units[1]!.definitionId)!;
+  before.definitions=before.definitions.map(d=>d.id===target.id?{...d,keywords:['VEHICLE']}:d);
+  const eligible=new GameEngine(before);
+  pass(eligible);
+  ok(eligible.selectShootingTarget('dragon-fusion-gun','unit-2'));pass(eligible);
+  ok(eligible.fireWeapon('dragon-fusion-gun','unit-2',()=>{called=true;return .99;}));
+  assert.equal(called,true);
 });
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;

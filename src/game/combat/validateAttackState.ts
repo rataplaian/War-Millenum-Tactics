@@ -4,6 +4,7 @@ import { abilitiesFor } from '../deployment/abilities';
 import { validAttackChoices } from '../abilities/validation';
 import { validateMovementAbilities } from '../abilities/movement';
 import { validateWeapon } from '../rules/weaponValues';
+import { factionAttackWeapon } from '../content/attackAbilities';
 /** Additive schema-3 fields: absent abilities/jobs preserve previous snapshots exactly. */
 export function validateAttackState(s: GameState) {
     const require = (value: unknown, why: string) => { if (!value)
@@ -22,7 +23,9 @@ export function validateAttackState(s: GameState) {
             require(tx.hazardousCount === undefined || natural(tx.hazardousCount), 'hazard count');
             const u = s.units.find(u => u.id === tx.unitId)!;
             const weapons = [...s.definitions.find(d => d.id === u.definitionId)!.weapons, ...(s.shooting?.firingDeck?.map(x => x.borrowed) ?? [])];
-            require(Object.entries(tx.attackChoices ?? {}).every(([id, choices]) => { const w = weapons.find(w => w.id === id); return w && validAttackChoices(w, choices); }), 'attack choices');
+            require(Object.entries(tx.attackChoices ?? {}).every(([id, choices]) => { const w = weapons.find(w => w.id === id);
+                const target = tx === s.shooting && s.shooting.selectedTarget?.weaponId === id ? s.units.find(v => v.id === s.shooting!.selectedTarget!.targetUnitId) : undefined;
+                return w && validAttackChoices(tx === s.shooting ? factionAttackWeapon(s,u,w,target) : w, choices); }), 'attack choices');
         }
     for (const tx of [s.movement, s.closeCombat?.charge])
         if (tx?.abilityChoices)

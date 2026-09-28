@@ -16,6 +16,8 @@ The updated Emperor's Children total is Lord Exultant 90, Sorcerer 55, Lord Kako
 
 `VERIFIED_MUSTER_PLANS` records attachments and transport passengers: Wave Serpent Fire Dragons plus Rangers (10/12); Rhino Lord Exultant with Infractors (11/12); Land Raider Sorcerer with Tormentors plus three double-space Flawless Blades (12/14). `createAeldariVsEmperorsChildrenMatch(seed)` currently executes Task 008's attachment and transport validations for this deployment fixture. The registry's full ability validation remains outstanding.
 
+The Farseer Eldritch Storm now rolls D3 damage; Farseer and Warlock Witchblades use Anti-Infantry 2+. Fire Dragons' Assured Destruction now grants optional Hit, Wound and Damage reroll permissions against Monster/Vehicle targets through a temporary weapon view, checked before dice and persisted in a paused attack snapshot. Guardian flamers now include their Assault and Ignores Cover abilities. These targeted corrections do not constitute a completed audit of every selected datasheet or its abilities.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

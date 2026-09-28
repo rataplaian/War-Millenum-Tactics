@@ -54,6 +54,7 @@ import { failure, movementPhaseError, validateBeginMovement, validateFinalPositi
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
 import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
+import { factionAttackWeapon } from '../content/attackAbilities';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { validateTerrainPath } from '../terrain/movement';
 import { isFinitePosition, EPSILON } from '../utils/geometry';
@@ -279,7 +280,7 @@ export class GameEngine {
     const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId) ?? this.state.shooting?.firingDeck?.find(x => x.borrowed.id === weaponId)?.borrowed;
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     const draft = copy(choices);
-    if (!validAttackChoices(weapon, draft)) return failure('INVALID_ABILITY_CHOICE');
+    if (!validAttackChoices(this.state.shooting ? factionAttackWeapon(this.state,unit,weapon) : weapon, draft)) return failure('INVALID_ABILITY_CHOICE');
     if (draft.shootingMode === 'INDIRECT' && !hasWeaponAbility(weapon, 'INDIRECT_FIRE')) return failure('INVALID_ABILITY_CHOICE');
     try { resolvedAbilities(this.state, unit, weapon, draft); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     if (this.state.shooting && draft.shootingMode) {
@@ -376,6 +377,10 @@ export class GameEngine {
       const legal = validateShootingTarget(s, s.shooting.unitId, weaponId, targetUnitId, this.visibility());
       if (!legal.ok) return legal;
       const target = s.units.find(u => u.id === targetUnitId)!;
+      const shooter = s.units.find(u=>u.id===s.shooting!.unitId)!;
+      const selectedWeapon = validateRangedWeapon(s,shooter.id,weaponId);
+      if (!selectedWeapon.ok) return selectedWeapon;
+      if (!validAttackChoices(factionAttackWeapon(s,shooter,selectedWeapon.value,target),s.shooting.attackChoices?.[weaponId] ?? {})) return failure('INVALID_ABILITY_CHOICE');
       s.shooting.selectedTarget = { weaponId, targetUnitId, modelCount: target.models.filter(m => m.alive).length, distances: Object.fromEntries(s.units.find(u => u.id === s.shooting!.unitId)!.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => [m.id, Math.min(...target.models.filter(m => m.alive).map(t => edgeDistance(m, t)))])) };
       recordFactionTarget(s,'attackedByPhase',s.shooting.unitId,[targetUnitId]);
       openWindow(s, 'AFTER_TARGET_SELECTED', { unitId: s.shooting.unitId, targetUnitId });
@@ -398,11 +403,13 @@ export class GameEngine {
     const target = this.state.units.find(u => u.id === targetUnitId)!;
     if (precisionModelId && !this.precisionTargets(transaction.unitId, weaponId, targetUnitId).includes(precisionModelId)) return failure('PRECISION_TARGET_INVALID');
     const choices = { ...transaction.attackChoices?.[weaponId], ...(hasWeaponAbility(weapon.value, 'INDIRECT_FIRE') ? { shootingMode: transaction.shootingMode ?? 'NORMAL' as const } : {}) };
+    const attackWeapon = factionAttackWeapon(this.state, this.state.units.find(u=>u.id===transaction.unitId)!, weapon.value, target);
+    if (!validAttackChoices(attackWeapon,choices)) return failure('INVALID_ABILITY_CHOICE');
     try { resolvedAbilities(this.state, target, weapon.value, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     const before = this.getState(), draft = this.getState();
     const shooter = draft.units.find(u => u.id === transaction.unitId)!;
     const modifiers = shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => shootingModifiers(draft, m, target, weapon.value.skill, provider, weapon.value, choices));
-    const job = createAttackJob(weapon.value, legal.value.eligibleFiringModelIds, copy(target), definitionFor(draft, target), rng, modifiers, draft, precisionModelId, choices, provider);
+    const job = createAttackJob(attackWeapon, legal.value.eligibleFiringModelIds, copy(target), definitionFor(draft, target), rng, modifiers, draft, precisionModelId, choices, provider);
     // Reserve selection before the first irreversible roll; One Shot is per original bearer/weapon.
     for (const model of shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id))) {
       if (job.contexts.find(c => c.attackerModelId === model.id)!.abilities.some(a => a.type === 'ONE_SHOT')) { model.oneShotExpended ??= []; model.oneShotExpended.push(weaponInstanceId(draft, shooter, model, weapon.value)); }

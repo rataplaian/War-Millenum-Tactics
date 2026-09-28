@@ -23,6 +23,7 @@ const implemented = {
   WAVE_SERPENT_SHIELD: 'content.defensiveWoundPenalty',
   SERPENT_SHIELD: 'content.serpentShieldSave',
   CREWED_PLATFORM: 'content.removeUncrewedPlatform',
+  INESCAPABLE_ACCURACY: 'combat.hitOutcome',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

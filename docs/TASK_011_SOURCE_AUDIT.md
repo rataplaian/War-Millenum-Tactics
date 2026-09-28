@@ -38,6 +38,8 @@ Wave Serpent Shield now supplies a ranged-only wound-roll penalty when the attac
 
 Storm Guardians now retain a model-profile role through initialization and snapshots. Their Serpent Shield grants an invulnerable save while the platform lives, and the existing shared damage pipeline removes that platform when the last Guardian dies (including mortal wounds). This role remains associated with the original models inside an Attached unit.
 
+Dark Reapers' Inescapable Accuracy uses optional, source-specific choices for BS and Hit modifiers in the shared ranged attack resolution. The selected modifiers are omitted from that attack only; other units and the selected weapon remain unchanged. Unsupported choices are rejected before an engine attack.
+
 ## Verified mechanics awaiting integration
 
 - [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.

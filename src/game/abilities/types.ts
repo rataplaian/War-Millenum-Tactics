@@ -24,6 +24,8 @@ export type UniversalCoreAbility = {
     kind: 'STEALTH' | 'HOVER' | 'SUPER_HEAVY_WALKER' | 'FIGHTS_FIRST';
 };
 export interface AttackChoices {
+    /** Inescapable Accuracy may omit selected BS/Hit modifier sources for this attack. */
+    ignoredAccuracyModifiers?: { bs?: string[]; hit?: string[] };
     abilities?: Record<string, string>;
     lethalHits?: boolean;
     psychicIgnore?: 'NONE' | 'PENALTIES' | 'ALL';

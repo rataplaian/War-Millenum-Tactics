@@ -298,6 +298,7 @@ export class GameEngine {
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     const draft = copy(choices);
     if (!validAttackChoices(this.state.shooting ? factionAttackWeapon(this.state,unit,weapon) : weapon, draft)) return failure('INVALID_ABILITY_CHOICE');
+    if (draft.ignoredAccuracyModifiers && !unit.models.some(m=>m.alive && modelDefinition(this.state,unit,m).abilities.some(a=>a.id==='INESCAPABLE_ACCURACY'))) return failure('INVALID_ABILITY_CHOICE');
     if (draft.shootingMode === 'INDIRECT' && !hasWeaponAbility(weapon, 'INDIRECT_FIRE')) return failure('INVALID_ABILITY_CHOICE');
     try { resolvedAbilities(this.state, unit, weapon, draft); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     if (this.state.shooting && draft.shootingMode) {

@@ -27,10 +27,10 @@ export function characteristicValue(s: GameState | undefined, unitId: string, mo
     return s && unitId ? effectiveCharacteristic(s, unitId, key, base, modelId) : base;
 }
 /** Characteristic and Hit modifiers stay separate. Psychic chooses before the final clamps. */
-export function skillValue(s: GameState | undefined, c: AttackContext, mode: 'ALL' | 'NONE' | 'PENALTIES', record: AttackRecord, timing: string) {
+export function skillValue(s: GameState | undefined, c: AttackContext, mode: 'ALL' | 'NONE' | 'PENALTIES', record: AttackRecord, timing: string, ignored: readonly string[] = []) {
     const key = c.weapon.kind === 'ranged' ? 'BS' : 'WS';
     const modifiers = [...(c.terrainModifiers?.modifiers.filter(m => m.source !== 'TEMPORARY_EFFECT').map(m => ({ source: m.source, target: key, amount: m.skillDelta, timing, stacking: 'STACK' as const, priority: 0 })) ?? []), ...characteristicModifiers(s, c.attackerUnitId, c.attackerModelId, key, timing)];
-    const applied = modifiers.filter(m => mode === 'NONE' || (mode === 'PENALTIES' && m.amount < 0));
+    const applied = modifiers.filter(m => (mode === 'NONE' || (mode === 'PENALTIES' && m.amount < 0)) && !ignored.includes(m.source));
     record.modifiers.push(...applied);
     return Math.max(2, Math.min(6, c.weapon.skill + applied.reduce((n, m) => n + m.amount, 0)));
 }
@@ -38,9 +38,10 @@ export function skillValue(s: GameState | undefined, c: AttackContext, mode: 'AL
 export function hitOutcome(s: GameState | undefined, c: AttackContext, choices: import('../abilities/types').AttackChoices, roll: number, record: AttackRecord, timing: string) {
     const has = (type: string) => c.abilities.some(a => a.type === type);
     const psychic = has('PSYCHIC') ? choices.psychicIgnore ?? 'PENALTIES' : 'NONE';
-    const skill = skillValue(s, c, psychic, record, timing);
-    const modifiers = characteristicModifiers(s, c.attackerUnitId, c.attackerModelId, 'HIT_ROLL', timing);
     const owner = s?.units.find(u => u.id === c.attackerUnitId), bearer = owner?.models.find(m => m.id === c.attackerModelId);
+    const accuracy = c.weapon.kind === 'ranged' && s && owner && bearer && modelDefinition(s,owner,bearer).abilities.some(a=>a.id==='INESCAPABLE_ACCURACY') ? choices.ignoredAccuracyModifiers : undefined;
+    const skill = skillValue(s, c, psychic, record, timing, accuracy?.bs);
+    const modifiers = characteristicModifiers(s, c.attackerUnitId, c.attackerModelId, 'HIT_ROLL', timing);
     const add = (source: string, amount: number) => modifiers.push({ source, target: 'HIT_ROLL', amount, timing, stacking: 'STACK', priority: 0 });
     if (has('HEAVY') && s?.phase === 'Shooting' && s.activePlayerId === owner?.playerId && !c.engaged && owner?.setupAtTurn !== s.turn && owner?.models.every(m => m.movementUsed <= 3))
         add('HEAVY', 1);
@@ -55,7 +56,7 @@ export function hitOutcome(s: GameState | undefined, c: AttackContext, choices: 
         modelKeywords(s,owner,bearer).some(k=>['DIRE_AVENGERS','GUARDIANS','SUPPORT_WEAPON','WAR_WALKERS'].includes(k)) &&
         s.mission?.objectives.some(o=>modelWithinObjective(s,bearer,o) || s.units.find(u=>u.id===c.targetUnitId)?.models.some(t=>t.alive&&modelWithinObjective(s,t,o))))
         add('DEFEND_AT_ALL_COSTS',1);
-    const applied = modifiers.filter(m => psychic === 'NONE' || (psychic === 'PENALTIES' && m.amount > 0));
+    const applied = modifiers.filter(m => (psychic === 'NONE' || (psychic === 'PENALTIES' && m.amount > 0)) && !accuracy?.hit?.includes(m.source));
     record.modifiers.push(...applied);
     const delta = Math.max(-1, Math.min(1, applied.reduce((n, m) => n + m.amount, 0)));
     const critical = isCriticalHit(roll, s?.combatRules?.criticalHitThreshold ?? 6);

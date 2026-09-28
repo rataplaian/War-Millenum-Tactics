@@ -31,6 +31,9 @@ export function validateCoreAbilities(list: readonly DeepReadonly<CoreAbility>[]
     }
 }
 export function validAttackChoices(w: DeepReadonly<Weapon>, c: AttackChoices) {
+    if(c.ignoredAccuracyModifiers !== undefined && (w.kind !== 'ranged' ||
+        Object.keys(c.ignoredAccuracyModifiers).some(key=>key!=='bs'&&key!=='hit') ||
+        Object.values(c.ignoredAccuracyModifiers).some(list=>!Array.isArray(list)||list.some(x=>typeof x!=='string'||!x)))) return false;
     if (c.shootingMode !== undefined && !['NORMAL', 'INDIRECT'].includes(c.shootingMode))
         return false;
     if (c.psychicIgnore !== undefined && !['ALL', 'NONE', 'PENALTIES'].includes(c.psychicIgnore))

@@ -283,6 +283,31 @@ test('Storm Guardian platform grants 5+ invulnerable saves then dies when the fi
   assert.equal(serpentShieldSave(job.target),undefined);
   assert.equal(target.models.at(-1)?.alive,true); // detached attack job leaves source state untouched until commit
 });
+test('Dark Reapers selectively ignore Ballistic Skill and Hit modifiers on ranged attacks only',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const s=createTestMatch(),reapers=AELDARI_DATASHEETS.find(d=>d.id==='dark-reapers')!;
+  s.definitions=[reapers,s.definitions[1]!];s.units[0]=createUnit(reapers,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:4})));
+  s.players[0]!.factionId=reapers.factionId;s.armies[0]!.factionId=reapers.factionId;
+  const e=engine(s);const unit=e.getState().units[0]!,weapon=reapers.weapons.find(w=>w.id==='reaper-launcher-starshot')!;
+  for(const [source,characteristic,value] of [['test-bs','BS',1],['test-hit','HIT_ROLL',-1]] as const)
+    ok(e.addTemporaryEffect({source,target:{unitId:'unit-1'},payload:{kind:'MODIFIER',characteristic,value},expiry:'END_OF_CURRENT_PHASE',stacking:'STACK'}));
+  const state=e.getState(),target=state.units[1]!,definition=state.definitions[1]!;
+  const resolve=(choices:Parameters<typeof createAttackJob>[8])=>{
+    const job=createAttackJob(weapon,[unit.models[0]!.id],target,definition,()=>.34,[],state,undefined,choices);
+    runAttackJob(job,()=>.34,state);return job.resolution.attackRecords![0]!;
+  };
+  assert.equal(resolve({}).hitSucceeded,false);
+  assert.equal(resolve({ignoredAccuracyModifiers:{bs:['test-bs']}}).hitSucceeded,false);
+  const clean=resolve({ignoredAccuracyModifiers:{bs:['test-bs'],hit:['test-hit']}});
+  assert.equal(clean.hitSucceeded,true);
+  assert.equal(clean.modifiers.some(m=>m.source==='test-bs'||m.source==='test-hit'),false);
+  assert.equal(reapers.weapons.find(w=>w.id===weapon.id)?.skill,3);
+  const other={...state,definitions:[{...reapers,abilities:[]},definition]};
+  const plain=createAttackJob(weapon,[unit.models[0]!.id],target,definition,()=>.34,[],other,undefined,{ignoredAccuracyModifiers:{bs:['test-bs'],hit:['test-hit']}});
+  runAttackJob(plain,()=>.34,other);
+  assert.equal(plain.resolution.attackRecords?.[0]?.hitSucceeded,false);
+  const snapshot=e.getState();assert.deepEqual(new GameEngine(snapshot).getState(),snapshot);
+});
 test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
   const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
   const u=createUnit(storm,'storm','p',Array.from({length:11},(_,i)=>({x:i,y:0})));

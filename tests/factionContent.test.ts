@@ -23,6 +23,8 @@ import { validAttackChoices } from '../src/game/abilities/validation';
 import { abilitiesFor, allHave, scoutDistance } from '../src/game/deployment/abilities';
 import { postShotHitTargets } from '../src/game/content/postShooting';
 import { resolveBattleShockRoll } from '../src/game/command/BattleShock';
+import { createCloseCombatTestMatch } from '../src/game/data/closeCombatPrototype';
+import { effectiveFlag } from '../src/game/effects/EffectEngine';
 import { canUseSuperlativeStrategist, rollStrategistDie } from '../src/game/content/strategist';
 
 test('Superlative Strategist rerolls one movement die for a living attached Autarch',()=>{
@@ -55,6 +57,47 @@ test('Rangers react to a nearby completed enemy move using the shared reaction t
   ok(e.completeReactionMove());
   assert.equal(e.usePathOfTheOutcast('unit-1',()=>0).ok,false);
   assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Daemonic Patrons affects melee critical wounds and takes one model when no attacks destroy an enemy',async()=>{
+  const {engine,pass}=await import('./flow.helpers');
+  const s=createCloseCombatTestMatch(),blades=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='flawless-blades')!;
+  s.phase='Fight';s.players[0]!.factionId=blades.factionId;s.armies[0]!.factionId=blades.factionId;
+  s.definitions=[blades,s.definitions[1]!];
+  s.units[0]=createUnit(blades,'unit-1','player-1',[{x:4.5,y:8.5},{x:6.1,y:8.5},{x:7.7,y:8.5}]);
+  const e=engine(s);pass(e);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,false);
+  assert.equal(e.startFightPhase().ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  for(const u of e.getState().units) assert.equal(e.skipTacticalMove(u.id).ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  assert.equal(e.selectFightUnit('unit-1').ok,true);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,true);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,false);
+  assert.equal(effectiveFlag(e.getState(),'unit-1','DAEMONIC_CRITICAL_WOUND'),true);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+  const snapshot=e.getState(),source=snapshot.units[0]!,target=snapshot.units[1]!,targetDef=snapshot.definitions[1]!;
+  const tougher={...targetDef,stats:{...targetDef.stats,toughness:12}};
+  snapshot.definitions=[snapshot.definitions[0]!,tougher];
+  const weapon=blades.weapons.find(w=>w.id==='blissblade')!;
+  const job=createAttackJob(weapon,[source.models[0]!.id],target,tougher,()=>.34,[],snapshot);
+  runAttackJob(job,()=>.34,snapshot);
+  assert.equal(job.resolution.attackRecords?.[0]?.wound?.value,3);
+  assert.equal(job.resolution.attackRecords?.[0]?.criticalWound,true);
+  assert.equal(e.completeFightUnit().ok,true);
+  pass(e);
+  assert.equal(e.selectFightUnit('unit-2').ok,true);
+  assert.equal(e.completeFightUnit().ok,true);
+  pass(e);
+  assert.equal(e.advanceFightStep().ok,true);
+  for(const u of e.getState().units.filter(u=>u.models.some(m=>m.alive))) assert.equal(e.skipTacticalMove(u.id).ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  assert.equal(e.tryNextPhase().ok,true);
+  pass(e);
+  assert.equal(e.tryNextPhase().ok,true);
+  pass(e);
+  assert.equal(e.tryNextPhase().ok,true);
+  assert.equal(e.getState().units[0]!.models.filter(m=>m.alive).length,2);
+  assert.ok(e.getState().events.some(x=>x.type==='flow'&&x.name==='DAEMONIC_PATRONS_RECKONING'));
 });
 
 test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
@@ -219,11 +262,11 @@ test('the live content registry resolves nineteen selected profiles and reports 
   assert.equal(registry.stratagem('DEATH_ECSTASY')?.cpCost,2);
   assert.equal(registry.ability('GUIDE')?.resolverId,'GameEngine.useGuide');
   assert.equal(registry.preset(AELDARI_PRESET.id)?.id,AELDARI_PRESET.id);
-  for(const [content,preset] of [[FACTION_CONTENT[0]!,AELDARI_PRESET],[FACTION_CONTENT[1]!,EMPERORS_CHILDREN_PRESET]] as const){
-    const result=validatePresetRoster(content,preset);
-    assert.equal(result.valid,false);
-    assert.ok(result.errors.some(error=>error.startsWith('Unregistered ability:')));
-  }
+  const aeldari=validatePresetRoster(FACTION_CONTENT[0]!,AELDARI_PRESET);
+  assert.equal(aeldari.valid,false);
+  assert.ok(aeldari.errors.some(error=>error.includes('BRANCHING_FATES')));
+  const emperorsChildren=validatePresetRoster(FACTION_CONTENT[1]!,EMPERORS_CHILDREN_PRESET);
+  assert.equal(emperorsChildren.valid,true,emperorsChildren.errors.join(', '));
 });
 test('Warped Interference grants Cover while the Sorcerer leads, and stops when the leader dies',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(7);

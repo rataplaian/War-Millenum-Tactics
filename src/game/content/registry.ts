@@ -35,6 +35,7 @@ const implemented = {
   PATH_OF_COMMAND: 'stratagems.StratagemEngine',
   SUPERLATIVE_STRATEGIST: 'content.rollStrategistDie',
   PATH_OF_THE_OUTCAST: 'GameEngine.usePathOfTheOutcast',
+  DAEMONIC_PATRONS: 'GameEngine.activateDaemonicPatrons',
   ASSAULT_VEHICLE: 'transports.TransportController',
   ASSAULT_RAMP: 'transports.TransportController',
 } as const;

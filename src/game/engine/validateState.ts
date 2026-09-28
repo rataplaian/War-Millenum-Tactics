@@ -105,6 +105,7 @@ export function validateState(state: GameState): void {
       Object.entries(tx.used).some(([id,d])=>!u.models.some(m=>m.id===id)||!nonNegative(d)||d>tx.allowance+EPSILON)) throw new Error('Invalid reaction movement transaction');
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !historicalUnit(state, event.unitId)))) throw new Error('Invalid event sequence');
+  if (state.daemonPatrons?.some(p=>!state.units.some(u=>u.id===p.unitId)||!Number.isSafeInteger(p.phaseIndex)||p.phaseIndex<0||!Number.isSafeInteger(p.fromSequence)||p.fromSequence<0||p.fromSequence>state.events.length)) throw new Error('Invalid patron pact');
   validateMissionState(state);
   validateAttackState(state);
   validateTransportState(state);

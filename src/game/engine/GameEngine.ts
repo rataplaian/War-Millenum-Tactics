@@ -209,6 +209,7 @@ export class GameEngine {
       const draft = this.getState(), before = this.getState();
       const result = new MatchFlowController(draft, this.policies.flow, this.policies.reserves).advance();
       if (!result.ok) return result;
+      if (before.phase==='Fight' && (draft.phase!=='Fight'||draft.turn!==before.turn)) this.resolveDaemonicPatrons(draft,before);
       if (draft.round > before.round) resolveReserveExpiration(draft, before.round, this.policies.reserves);
       if (draft.status === 'finished') resolveReserveExpiration(draft, draft.round, this.policies.reserves, true);
       if (draft.phase === 'Charge' || draft.turn > before.turn) for (const u of draft.units) delete u.moveLock;
@@ -225,6 +226,7 @@ export class GameEngine {
     if (this.state.phase === 'Fight' && !this.state.closeCombat?.fight && this.state.units.some(u => onBattlefield(u) && (u.state.hasCharged || isUnitEngaged(this.state, u)))) return failure('WRONG_FIGHT_STEP');
     const before = this.getState();
     const next = transition(this.getState());
+    if (before.phase==='Fight' && (next.phase!=='Fight'||next.turn!==before.turn)) this.resolveDaemonicPatrons(next,before);
     if (next.round > before.round) resolveReserveExpiration(next, before.round, this.policies.reserves);
     if (next.phase === 'Charge' || next.turn > before.turn) for (const u of next.units) delete u.moveLock;
     this.commit(next);
@@ -609,6 +611,28 @@ export class GameEngine {
   }
   skipTacticalMove(id: string) { return this.combatCommand(c => c.skipTacticalMove(id)); }
   selectFightUnit(id: string) { return this.combatCommand(c => c.selectFightUnit(id)); }
+  activateDaemonicPatrons(unitId:string):CommandResult {
+    return this.flowCommand(s=>{
+      const selected=s.closeCombat?.fight?.selected,u=s.units.find(u=>u.id===unitId),phaseIndex=s.flow?.phaseIndex??s.turn*5+4;
+      if(s.phase!=='Fight'||!selected||selected.unitId!==unitId||selected.hasRolled||!u?.models.some(m=>m.alive)||
+        !sourceAbilities(s,u).some(x=>x.ability.id==='DAEMONIC_PATRONS')||s.daemonPatrons?.some(x=>x.unitId===unitId&&x.phaseIndex===phaseIndex))return failure('UNIT_NOT_ELIGIBLE');
+      (s.daemonPatrons??=[]).push({unitId,phaseIndex,fromSequence:s.events.length});
+      applyEffect(s,{source:'DAEMONIC_PATRONS',target:{unitId},payload:{kind:'FLAG',flag:'DAEMONIC_CRITICAL_WOUND',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'NON_STACKING'});
+      flowEvent(s,'DAEMONIC_PATRONS_INVOKED',{},unitId,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
+  private resolveDaemonicPatrons(draft:GameState,before:GameState) {
+    const pending=draft.daemonPatrons??[];
+    for(const pact of pending.filter(p=>p.phaseIndex===(before.flow?.phaseIndex??before.turn*5+4))){
+      const u=draft.units.find(x=>x.id===pact.unitId);
+      const killed=before.events.some(e=>e.sequence>pact.fromSequence&&e.type==='melee-attack-resolved'&&e.unitId===pact.unitId&&e.resolution.destroyedModelIds.length>0);
+      const victim=!killed&&u?.models.find(m=>m.alive);
+      if(victim){victim.alive=false;victim.woundsRemaining=0;flowEvent(draft,'DAEMONIC_PATRONS_RECKONING',{modelId:victim.id},pact.unitId,u!.playerId);}
+    }
+    draft.daemonPatrons=pending.filter(p=>p.phaseIndex!==(before.flow?.phaseIndex??before.turn*5+4));
+    queueDestructions(before,draft);processAttachmentCasualties(draft);normalizeDestroyed(draft);
+  }
   selectMeleeTarget(weaponId:string,targetUnitId:string) {
     return this.flowCommand(s=>{
       const blocker=temporalBlock(s); if(blocker) return blocker;

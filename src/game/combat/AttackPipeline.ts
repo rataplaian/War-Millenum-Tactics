@@ -119,7 +119,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 const needed = woundTarget(characteristic('STRENGTH', w.strength), s ? attackToughness(s, j.target) : j.targetDefinition.stats.toughness);
                 const warding = !!(s && effectiveFlag(s,c.attackerUnitId,'OBJECTIVE_WOUND_REROLL') && s.mission?.objectives.some(o=>j.target.models.some(m=>m.alive&&modelWithinObjective(s,m,o))));
                 const wants = j.choices.rerolls?.WOUND ?? (permission(w,'WOUND')?.source?.startsWith('EXCESSIVE_ASSAULT') ? 'ONES' : ability(c, 'TWIN_LINKED') || warding ? 'FAILED' : 'NONE');
-                const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
+                const anti = ability(c, 'ANTI'), threshold = s && w.kind==='melee' && effectiveFlag(s,c.attackerUnitId,'DAEMONIC_CRITICAL_WOUND') ? 3 : anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
                 const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? 1 : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? 1 : 0) - defensiveWoundPenalty(s,j.target,w,characteristic('STRENGTH',w.strength))));
                 const failed = a.wound.value === 1 || (!isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6)) && a.wound.value + delta < needed);
                 if ((ability(c, 'TWIN_LINKED') || permission(w, 'WOUND') || warding) && (wants === 'ALL' || (wants === 'FAILED' && failed) || (wants === 'ONES' && a.wound.value===1)))
@@ -139,7 +139,7 @@ export function runAttackJob(j: AttackJob, rng: RandomSource, s?: GameState, pau
                 r.woundTargets.push(needed);
             }
             if (a.wound) {
-                const anti = ability(c, 'ANTI'), threshold = anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
+                const anti = ability(c, 'ANTI'), threshold = s && w.kind==='melee' && effectiveFlag(s,c.attackerUnitId,'DAEMONIC_CRITICAL_WOUND') ? 3 : anti && s && unitKeywords(s, j.target).includes(anti.keyword?.toUpperCase() ?? '') ? anti.threshold ?? 6 : s?.combatRules?.criticalWoundThreshold ?? 6;
                 a.criticalWound = isCriticalWound(a.wound.value, Math.min(threshold, s?.combatRules?.criticalWoundThreshold ?? 6));
                 const delta = Math.max(-1, Math.min(1, characteristic('WOUND_ROLL', 0) + (ability(c, 'LANCE') && c.charged ? mod(a, 'LANCE', 'WOUND', 1) : 0) - (s && effectiveFlag(s,j.target.id,'DEFENDER_WOUND_PENALTY') ? mod(a,'SHIELD_NODES','WOUND',1) : 0) - (defensiveWoundPenalty(s,j.target,w,characteristic('STRENGTH',w.strength)) ? mod(a,'WAVE_SERPENT_SHIELD','WOUND',1) : 0)));
                 a.woundSucceeded = a.wound.value !== 1 && (a.criticalWound || a.wound.value + delta >= needed);

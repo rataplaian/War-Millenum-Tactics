@@ -124,6 +124,8 @@ export const PHASES = ['Command', 'Movement', 'Shooting', 'Charge', 'Fight'] as 
 export type Phase = typeof PHASES[number];
 export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
+  /** Voluntary Fight-phase pacts awaiting their end-of-phase consequence. */
+  daemonPatrons?: {unitId:string;phaseIndex:number;fromSequence:number}[];
   /** Roster-owned enhancement IDs keyed by original source unit (survive attachment/split). */
   enhancements?: Record<string,string>;
   /** Destroyed melee defenders that must strike after their attacker completes its activation. */

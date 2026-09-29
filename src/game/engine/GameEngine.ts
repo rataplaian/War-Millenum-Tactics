@@ -590,6 +590,10 @@ export class GameEngine {
         if (event.type === 'combat-move-completed' && event.kind === 'charge') openWindow(draft, 'AFTER_CHARGE_MOVE', { unitId: event.unitId });
         if (event.type === 'fight-unit-completed') { finishAttacker(draft, event.unitId); }
         if (event.type === 'melee-attack-resolved') processAttachmentCasualties(draft, event.unitId);
+        if (event.type === 'flow' && event.name === 'FIGHT_ON_DEATH_RESOLVED') {
+          const attackerId = event.detail.attackerUnitId as string;
+          if (!draft.fightOnDeath?.some(p => p.attackerUnitId === attackerId && p.defenderUnitId === event.unitId)) finishAttacker(draft, attackerId);
+        }
         if (event.type === 'fight-unit-completed') openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: event.unitId });
       }
       detectDestroyedTransports(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.commit(draft); }
@@ -822,6 +826,15 @@ export class GameEngine {
     const draft = this.getState(), result = command(draft);
     if (result.ok) { queueDestructions(this.state, draft, draft.attackJob?.attackerUnitId); if (draft.attackJob) draft.attackJob.target = copy(draft.units.find(u => u.id === draft.attackJob!.target.id)!); recordDestroyedUnits(this.state, draft); interruptActionsOnCommit(this.state, draft); synchronizeMission(draft, this.policies.reserves); validateState(draft); this.state = draft; }
     return copy(result);
+  }
+  /** Optional between-action window for Stratagems whose timing is any point in a phase. */
+  openPhaseStratagemWindow(): CommandResult {
+    return this.flowCommand(s=>{
+      if (s.flow?.window || s.flow?.boundary!=='NONE' || s.flow?.pending.length || actionBusy(s)) return failure('PHASE_BLOCKED');
+      if (!['Movement','Shooting','Fight','Command'].includes(s.phase)) return failure('WRONG_PHASE');
+      openWindow(s,'DURING_PHASE');
+      return {ok:true,value:undefined};
+    });
   }
   /** Explicit migration: legacy snapshots keep their original phase progression until enabled. */
   enableMatchFlow(rules: Partial<FlowRules> = {}): CommandResult {

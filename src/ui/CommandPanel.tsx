@@ -17,6 +17,7 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
     {debug.units.map(u => <Text key={u.id} style={text}>{u.id}: Battle-shocked {u.battleShocked ? 'YES' : 'NO'} · OC {u.objectiveControl ?? '—'} · Move {u.movement}″ · Actions {u.canStartAction ? 'eligible' : 'blocked'} · Retreat {u.orderedRetreat ? 'ordered allowed' : 'desperate escape required'}</Text>)}
     {state.phase === 'Command' && flow.commandStep && <Button title="ADVANCE COMMAND STEP" onPress={() => report(engine.advanceCommandStep(), 'Command step advanced.')} />}
     <Text style={text}>Timing window: {flow.window?.trigger ?? 'none'} · Queued: {flow.queuedWindows.length}</Text>
+    {!flow.window && ['Command','Movement','Shooting','Fight'].includes(state.phase) && <Button title="OPEN PHASE STRATAGEM WINDOW" onPress={()=>report(engine.openPhaseStratagemWindow(),'Phase Stratagem window opened.')} />}
     {flow.window && state.players.map(p => <View key={p.id} style={{ gap: 5 }}>
       <Text style={text}>Available Stratagems · {p.name}</Text>
       {engine.getStratagemOptions(p.id).filter(o => state.units.find(u => u.id === o.targetIds[0])?.playerId === p.id).map(o => <View key={`${o.stratagemId}:${o.targetIds.join()}`}>

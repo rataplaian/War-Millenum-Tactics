@@ -71,19 +71,22 @@ export function processAttachmentCasualties(s: GameState, attackerId?: string) {
     const u = s.units.find(u => u.id === a.id)!;
     for (const c of a.components) if (!u.models.some(m => m.componentUnitId === c.original.id && m.alive) && !a.destroyedComponentIds.includes(c.original.id)) {
       a.destroyedComponentIds.push(c.original.id);
-      if (attackerId) a.retainedSources.push({ componentId: c.original.id, attackerId });
+      if (attackerId && attackerId !== a.id) a.retainedSources.push({ componentId: c.original.id, attackerId });
       flowEvent(s, 'ATTACHED_COMPONENT_DESTROYED', { componentId: c.original.id, keywords: [...s.definitions.find(d => d.id === c.original.definitionId)!.keywords] }, u.id, u.playerId);
     }
     const bodyAlive = a.components.some(c => c.role === 'BODYGUARD' && !a.destroyedComponentIds.includes(c.original.id));
     const attachedAlive = a.components.some(c => c.role !== 'BODYGUARD' && !a.destroyedComponentIds.includes(c.original.id));
     if (!bodyAlive || !attachedAlive) {
-      if (attackerId) { if (!a.pendingSplitBy.includes(attackerId)) a.pendingSplitBy.push(attackerId); }
+      if (attackerId && attackerId !== a.id) { if (!a.pendingSplitBy.includes(attackerId)) a.pendingSplitBy.push(attackerId); }
       else if (!a.pendingSplitBy.length) split(s, a, u);
     }
   }
 }
 export function finishAttacker(s: GameState, attackerId: string) {
   for (const a of s.attachments?.filter(a => a.active) ?? []) {
+    // Keep the aggregate and its source weapon IDs intact until every slain model
+    // has resolved Fight on Death against this attacker's completed activation.
+    if (s.fightOnDeath?.some(p => p.defenderUnitId === a.id && p.attackerUnitId === attackerId)) continue;
     a.retainedSources = a.retainedSources.filter(x => x.attackerId !== attackerId);
     const pending = a.pendingSplitBy.includes(attackerId); a.pendingSplitBy = a.pendingSplitBy.filter(id => id !== attackerId);
     if (pending && !a.pendingSplitBy.length) split(s, a, s.units.find(u => u.id === a.id)!);

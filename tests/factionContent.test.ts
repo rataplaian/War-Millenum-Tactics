@@ -338,6 +338,28 @@ test('the live content registry resolves nineteen selected profiles and reports 
   const emperorsChildren=validatePresetRoster(FACTION_CONTENT[1]!,EMPERORS_CHILDREN_PRESET);
   assert.equal(emperorsChildren.valid,true,emperorsChildren.errors.join(', '));
 });
+test('selected faction loadouts retain model counts, wargear and source keywords',()=>{
+  const expected: Record<string, [number, string][]> = {
+    'storm-guardians': [[6,'shuriken-pistol'],[2,'guardian-flamer'],[2,'guardian-fusion-gun'],[1,'close-combat-weapon']],
+    'dire-avengers': [[9,'avenger-shuriken-catapult'],[1,'avenger-shuriken-catapult']],
+    'fire-dragons': [[4,'dragon-fusion-gun'],[1,'exarch-dragon-fusion-gun']],
+    'dark-reapers': [[4,'reaper-launcher-starshot'],[1,'tempest-launcher']],
+    'infractors': [[9,'duelling-sabre'],[1,'infractor-power-sword']],
+    'tormentors': [[4,'boltgun'],[1,'bolt-pistol']],
+    'noise-marines': [[4,'sonic-blaster'],[2,'blastmaster-single']],
+  };
+  for (const d of [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS]) {
+    assert.equal(d.placeholder,false,d.id);
+    assert.equal(d.modelProfiles?.reduce((n,p)=>n+p.count,0)??d.modelCount,d.modelCount,d.id);
+    for (const [count,weapon] of expected[d.id]??[]) assert.equal(d.modelProfiles?.filter(p=>p.count===count&&p.weaponIds.includes(weapon)).length,1,`${d.id}: ${weapon}`);
+    for (const p of d.modelProfiles??[]) for(const id of p.weaponIds) assert.ok(d.weapons.some(w=>w.id===id),`${d.id}: ${id}`);
+    if (d.factionId==='EMPERORS_CHILDREN') assert.ok(d.keywords.includes('SLAANESH'),d.id);
+  }
+  for (const id of ['infractors','tormentors','flawless-blades']) assert.ok(EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id===id)?.keywords.includes('GRENADES'));
+  const tormentors=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='tormentors')!;
+  assert.deepEqual(tormentors.weapons.find(w=>w.id==='bolt-pistol')?.weaponAbilities?.map(a=>a.type),['PISTOL','PRECISION']);
+  for (const id of ['wave-serpent','chaos-rhino']) assert.ok([...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)?.keywords.includes('DEDICATED_TRANSPORT'));
+});
 test('Warped Interference grants Cover while the Sorcerer leads, and stops when the leader dies',()=>{
   const s=createAeldariVsEmperorsChildrenMatch(7);
   const defender=s.units.find(u=>u.id==='tormentor-command')!,attacker=s.units.find(u=>u.id==='storm-council')!;

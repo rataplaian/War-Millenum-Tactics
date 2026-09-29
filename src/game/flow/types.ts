@@ -2,7 +2,7 @@ import type { GameState, Phase, CommandResult } from '../models';
 import type { Effect } from '../effects/types';
 export const COMMAND_STEPS = ['START_OF_COMMAND_PHASE', 'GAIN_CORE_CP', 'BATTLE_SHOCK', 'COMMAND_ABILITIES', 'END_OF_COMMAND_PHASE'] as const;
 export type CommandStep = typeof COMMAND_STEPS[number];
-export type Trigger = 'START_OF_PHASE' | 'END_OF_PHASE' | 'START_OF_TURN' | 'END_OF_TURN' |
+export type Trigger = 'START_OF_PHASE' | 'DURING_PHASE' | 'END_OF_PHASE' | 'START_OF_TURN' | 'END_OF_TURN' |
   'AT_START_OF_COMMAND_PHASE' | 'AT_END_OF_COMMAND_PHASE' | 'AFTER_ENEMY_MOVE' | 'AFTER_ENEMY_FALL_BACK' | 'AFTER_ENEMY_DESTROYED' | 'BEFORE_CONSOLIDATE' | 'AFTER_TARGET_SELECTED' | 'AFTER_HIT_ROLL' |
   'AFTER_WOUND_ROLL' | 'AFTER_DAMAGE_ROLL' | 'AFTER_UNIT_SHOT' | 'AFTER_CHARGE_MOVE' | 'AFTER_UNIT_FOUGHT' | 'AFTER_BATTLE_SHOCK_FAILED';
 export interface TimingWindow { id: string; trigger: Trigger; playerId: string; unitId?: string; targetUnitId?: string; passedPlayerIds: string[] }

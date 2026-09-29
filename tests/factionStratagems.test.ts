@@ -57,6 +57,20 @@ test('Guardian and Peerless catalogs expose exactly six unique stratagems each',
   assert.equal(new Set(FACTION_STRATAGEMS.map(s=>s.id)).size,12);
   for(const s of FACTION_STRATAGEMS) assert.ok(s.cpCost>0 && s.resolverId && s.timing.triggers.length>0);
 });
+test('phase-wide faction stratagems remain available between actions on the correct turn',()=>{
+  const shooting=fixture('Shooting');reachPhaseStart(shooting);pass(shooting);
+  ok(shooting.openPhaseStratagemWindow());
+  assert.equal(shooting.getState().flow?.window?.trigger,'DURING_PHASE');
+  ok(shooting.useStratagem('WARDING_SALVOES','player-1',['unit-1']));
+  const state=shooting.getState();
+  assert.equal(shooting.useStratagem('WARDING_SALVOES','player-2',['unit-2']).ok,false);
+  assert.deepEqual(shooting.getState(),state);
+  assert.deepEqual(new GameEngine(state).getState(),state);
+  const movement=fixture('Movement');reachPhaseStart(movement);pass(movement);
+  ok(movement.openPhaseStratagemWindow());
+  ok(movement.useStratagem('TIME_TO_STRIKE','player-1',['unit-1']));
+  assert.equal(movement.getState().flow?.window?.trigger,'DURING_PHASE');
+});
 test('Warding Salvoes applies its objective wound permission only after spending CP',()=>{
   const e=fixture('Shooting');reachPhaseStart(e);
   const before=e.getState();

@@ -19,7 +19,8 @@ export function resetBattleFocus(s: GameState): void {
 /** One token and one manoeuvre per unit per phase; only Swift may repeat on different units. */
 export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?:RandomSource, reroll=false): CommandResult {
   const focus=s.battleFocus,u=s.units.find(x=>x.id===unitId);
-  if (!focus || !u || !hasFactionRule(s,u,'BATTLE_FOCUS') || !onBattlefield(u) || !u.models.some(m=>m.alive)) return failure('UNIT_NOT_ELIGIBLE');
+  const incomingSetup=id==='FLITTING_SHADOWS' && trigger==='SETUP' && s.phase==='Movement' && s.setup?.unitId===unitId && s.setup.kind==='INGRESS_MOVE';
+  if (!focus || !u || !hasFactionRule(s,u,'BATTLE_FOCUS') || (!onBattlefield(u) && !incomingSetup) || !u.models.some(m=>m.alive)) return failure('UNIT_NOT_ELIGIBLE');
   if (trigger==='MOVE' && (s.movement || u.state.hasMoved)) return failure('MOVEMENT_IN_PROGRESS');
   if (!AGILE_MANOEUVRES.includes(id) || focus.round!==s.round || (focus.tokens[u.playerId]??0)<1) return failure('UNIT_NOT_ELIGIBLE');
   if (u.state.battleShocked) return failure('BATTLE_SHOCKED');
@@ -27,7 +28,7 @@ export function useAgileManoeuvre(s:GameState,id:AgileManoeuvre,unitId:string, t
   if (focus.usedByPhase[key]?.includes(unitId) || (id!=='SWIFT_AS_THE_WIND' && focus.manoeuvresByPhase[key]?.includes(id))) return failure('USAGE_LIMIT');
   const ownTurn=u.playerId===s.activePlayerId;
   if (id==='SWIFT_AS_THE_WIND' && !(ownTurn && s.phase==='Movement' && trigger==='MOVE' && !!moveType)) return failure('WRONG_TIMING');
-  if (id==='FLITTING_SHADOWS' && !(ownTurn && (s.phase==='Movement' && (trigger==='MOVE'||trigger==='SETUP') || s.phase==='Charge' && trigger==='CHARGE'))) return failure('WRONG_TIMING');
+  if (id==='FLITTING_SHADOWS' && !(ownTurn && (s.phase==='Movement' && (trigger==='MOVE' && !!moveType && !s.movement && !u.state.hasMoved || incomingSetup) || s.phase==='Charge' && trigger==='CHARGE' && !s.closeCombat?.charge && !s.closeCombat?.declared.includes(unitId)))) return failure('WRONG_TIMING');
   if (id==='STAR_ENGINES' && !(ownTurn && s.phase==='Movement' && trigger==='MOVE' && moveType==='ADVANCE_MOVE' && s.definitions.find(d=>d.id===u.definitionId)?.keywords.includes('VEHICLE'))) return failure('WRONG_TIMING');
   if (id==='SUDDEN_STRIKE' && !(ownTurn && s.phase==='Fight' && trigger==='FIGHT' && s.closeCombat?.fight?.selected?.unitId===unitId)) return failure('WRONG_TIMING');
   if (id==='OPPORTUNITY_SEIZED' && !(s.phase==='Movement' && !ownTurn && trigger==='ENEMY_FALL_BACK' && s.flow?.window?.trigger==='AFTER_ENEMY_FALL_BACK')) return failure('WRONG_TIMING');

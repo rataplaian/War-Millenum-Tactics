@@ -10,6 +10,7 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
     <Text style={text}>Round {state.round}/{flow.rules.maximumBattleRounds} · Turn {state.turn} · Phase #{flow.phaseIndex}</Text>
     <Text style={text}>Command step: {flow.commandStep ?? '—'} · Boundary: {flow.boundary}</Text>
     {state.players.map(p => <Text key={p.id} style={text}>{p.name}: {p.commandPoints} CP · Extra this round: {p.extraCpGainedThisBattleRound}/{flow.rules.maxExtraCpPerBattleRound}</Text>)}
+    {state.battleFocus && state.players.map(p=><Text key={`focus-${p.id}`} style={text}>{p.name}: {state.battleFocus!.tokens[p.id]??0} Battle Focus tokens</Text>)}
     <Text style={text}>Pending: {flow.pending.length} · {debug.blockers.join(', ') || 'No phase blockers'}</Text>
     {flow.pending.map(p => <View key={p.id}><Text style={text}>{p.label}</Text><Button title={p.kind === 'BATTLE_SHOCK' ? `ROLL 2D6: ${p.unitId}` : `RESOLVE ${p.label}`} onPress={() => report(p.kind === 'BATTLE_SHOCK' ? engine.rollBattleShock(p.unitId!, rng) : engine.resolveCommandAbility(p.id), 'Mandatory resolution completed.')} /></View>)}
     {engine.getCommandAbilities().map(a => <Button key={a.id} title={`OPTIONAL ABILITY: ${a.id}`} disabled={!a.available} onPress={() => report(engine.resolveCommandAbility(a.id), 'Command ability resolved.')} />)}
@@ -25,6 +26,8 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
     {flow.window?.trigger==='AFTER_ENEMY_MOVE' && state.units.filter(u=>u.playerId!==state.activePlayerId&&sourceAbilities(state,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST')).map(u=><Button key={u.id} title={`PATH OF THE OUTCAST · ${u.id}`} onPress={()=>report(engine.usePathOfTheOutcast(u.id,rng),'Rangers reaction rolled.')} />)}
+    {state.battleFocus && flow.window?.trigger==='AFTER_ENEMY_FALL_BACK' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`OPPORTUNITY SEIZED · ${u.id}`} onPress={()=>report(engine.useAgileManoeuvre('OPPORTUNITY_SEIZED',u.id,'ENEMY_FALL_BACK',undefined,rng),'Reaction move rolled.')} />)}
+    {state.battleFocus && flow.window?.trigger==='AFTER_UNIT_SHOT' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`FADE BACK · ${u.id}`} onPress={()=>report(engine.useAgileManoeuvre('FADE_BACK',u.id,'AFTER_ENEMY_SHOT',undefined,rng),'Reaction move rolled.')} />)}
     {flow.window?.trigger==='END_OF_PHASE' && state.phase==='Movement' && state.units.filter(u=>u.playerId===state.activePlayerId&&sourceAbilities(state,u).some(x=>x.ability.id==='GUIDE')).map(u=><View key={u.id}>{state.units.filter(target=>target.playerId!==u.playerId).map(target=><Button key={target.id} title={`GUIDE ${u.id} → ${target.id}`} onPress={()=>report(engine.useGuide(u.id,target.id),'Guide applied.')} />)}</View>)}
     {state.attackJob && flow.window && ['AFTER_HIT_ROLL','AFTER_WOUND_ROLL','AFTER_DAMAGE_ROLL'].includes(flow.window.trigger) && <View style={{gap:5}}>
       <Button title="BRANCHING FATES · REPLACE DIE WITH SIX" onPress={()=>report(engine.useBranchingFates(),'Branching Fates used.')} />

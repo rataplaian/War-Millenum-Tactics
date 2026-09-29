@@ -131,6 +131,12 @@ export function GameScreen() {
           {scenario !== 'FACTIONS' && <Text style={styles.note}>PLACEHOLDER DATA</Text>}
           <Button title="SELECT UNIT" onPress={() => chooseUnit(unit.id)}
             disabled={state.phase !== 'Movement' || unit.playerId !== state.activePlayerId || unit.state.hasMoved || !!state.movement} />
+          {state.phase==='Movement' && <Button title="BEGIN ADVANCE" disabled={unit.playerId!==state.activePlayerId || unit.state.hasMoved || !!state.movement} onPress={()=>report(engine.current!.beginMovement(unit.id,'ADVANCE_MOVE',rng.current!),'Advance rolled. Select a model and destination.')} />}
+          {state.battleFocus && state.phase==='Movement' && unit.playerId===state.activePlayerId && <View style={{gap:4}}>
+            <Button title="BATTLE FOCUS · SWIFT AS THE WIND" onPress={()=>report(engine.current!.useAgileManoeuvre('SWIFT_AS_THE_WIND',unit.id,'MOVE','NORMAL_MOVE'),'Swift as the Wind used.')} />
+            <Button title="BATTLE FOCUS · FLITTING SHADOWS" onPress={()=>report(engine.current!.useAgileManoeuvre('FLITTING_SHADOWS',unit.id,'MOVE','NORMAL_MOVE'),'Flitting Shadows used.')} />
+            <Button title="BATTLE FOCUS · STAR ENGINES" onPress={()=>report(engine.current!.useAgileManoeuvre('STAR_ENGINES',unit.id,'MOVE','ADVANCE_MOVE'),'Star Engines used.')} />
+          </View>}
           {state.movement?.unitId === unit.id && unit.models.filter(m => m.alive).map((model, i) =>
             <View key={model.id} style={{ gap: 4 }}>
               <Button title={`${selectedModelId === model.id ? 'SELECTED' : 'SELECT'} MODEL ${i + 1}`} onPress={() => chooseModel(unit.id, model.id)} />

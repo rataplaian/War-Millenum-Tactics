@@ -21,7 +21,8 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
     <Text style={{ color: '#fff', fontSize: 18 }}>Charge / Fight debug</Text>
     {state.phase === 'Charge' && <>
       {!combat?.charge && state.units.filter(u => u.playerId === state.activePlayerId).map(u =>
-        <Button key={u.id} title={`CHARGE: ${label(u.id)}`} onPress={() => run(engine.declareCharge(u.id, rng), 'Charge rolled. Select targets after the roll.')} />)}
+        <View key={u.id} style={{gap:4}}><Button title={`CHARGE: ${label(u.id)}`} onPress={() => run(engine.declareCharge(u.id, rng), 'Charge rolled. Select targets after the roll.')} />
+          {state.battleFocus && <Button title={`FLITTING SHADOWS · ${label(u.id)}`} onPress={()=>run(engine.useAgileManoeuvre('FLITTING_SHADOWS',u.id,'CHARGE'))} />}</View>)}
       {combat?.charge && <>
         <Text style={{ color: '#fcd34d' }}>2D6: {combat.charge.rolls.join(' + ')} = {combat.charge.distance}″</Text>
         {!combat.move && <>
@@ -49,6 +50,7 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
       </>}
       {chosen && !combat?.move && <>
         <Text style={{ color: '#fff' }}>Fighting: {label(chosen.id)}</Text>
+        {state.battleFocus && <Button title="BATTLE FOCUS · SUDDEN STRIKE" onPress={()=>run(engine.useAgileManoeuvre('SUDDEN_STRIKE',chosen.id,'FIGHT'))} />}
         {chosen.playerId===state.activePlayerId && <View style={{gap:4}}>
           <Button title="EXQUISITE SWORDSMANSHIP · LETHAL HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('LETHAL_HITS'))} />
           <Button title="EXQUISITE SWORDSMANSHIP · SUSTAINED HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('SUSTAINED_HITS'))} />

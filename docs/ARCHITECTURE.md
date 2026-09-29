@@ -528,7 +528,7 @@ The implementation uses a small typed condition vocabulary (`CONTROLLED_OBJECTIV
 
 Task 010 validation adds 29 focused tests to the unchanged 568-test baseline (597 total). The project runs app and isolated-engine TypeScript checks and `git diff --check`; mobile exports and device builds are intentionally excluded from this task.
 
-## Task 011 — faction vertical slice in progress
+## Task 011 — faction vertical slice
 
 `content/factionDatasheets.ts` contains only the 19 chosen Aeldari and Emperor's Children definitions. `modelProfiles` supplies the equipment, wounds and base for each group of models without copying stats into mutable unit state. `createUnit` instantiates those profiles, and `attachments/queries.ts` resolves original weapons and characteristics on joined units. The two preset rosters live in `content/presets.ts`; the seeded match creator uses the existing Task 006 mission, Task 008 attachment and transport transactions, and deployment stage. `verifiedEntries.ts` records the exact source snapshot and point references. The catalog is not a general army database.
 
@@ -540,6 +540,8 @@ Battle Focus token totals and six timing choices belong to `content/BattleFocus.
 
 The faction registry resolves the selected content references, and both real presets pass `validatePresetRoster`. Vaul's Vengeance uses a locked, serializable out-of-phase Shooting transaction with the shared attack pipeline; a War Walkers fixture exercises it without adding an extra datasheet to the requested preset. The debug screen launches the faction match and exposes the reaction's legal weapon choices. The shared event validator distinguishes these out-of-turn attack events from ordinary turn actions.
 
-**Still incomplete:** out-of-phase Shooting does not pause for roll-triggered reactions; the final debug usability pass and broad twelve-Stratagem timing/interactions remain to be audited before PR #11 can be marked ready. Do not treat the presence of an ability ID or a Stratagem definition as proof of every interaction. The source priority is official 11th-edition GW rules and errata, followed by the 11th-edition datasheet mirror; older-edition pages are not used.
+**Known limitation:** Vaul's Vengeance reaction Shooting does not expose nested mid-roll reaction pauses. Its attack job still resolves Hit, Wound, Save, Damage and casualties; this does not block the selected vertical slice. The source priority is official 11th-edition GW rules and errata, followed by the 11th-edition datasheet mirror; older-edition pages are not used.
 
 A generic `DURING_PHASE` timing window can be opened between committed actions for effects usable at any time during a phase. The engine owns the window and snapshot validator; the debug Command panel merely requests it. Fight-on-Death defers splitting an attached defender until slain models from the original component resolve their source weapons, after which the normal attachment cleanup runs.
+
+Terrifying Spectacle uses a serializable per-Command-phase resolved-Battle-shock marker shared with `CommandController`; a model cannot be asked to repeat its mandatory test after the reaction. The debug panels obtain contextual target IDs from `getFactionDebugOptions`, select melee targets through the Fight controller, and forward commands to the engine. See `TASK_011_SOURCE_AUDIT.md` for the twelve audited faction Stratagems.

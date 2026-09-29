@@ -5,7 +5,7 @@ import type { RandomSource } from '../game/utils/dice';
 import { sourceAbilities } from '../game/attachments/queries';
 export function CommandPanel({ state, engine, rng, report }: { state: GameState; engine: GameEngine; rng: RandomSource; report: (r: CommandResult<unknown>, message: string) => void }) {
   const flow = state.flow; if (!flow) return null;
-  const debug = engine.getCommandDebug(), text = { color: '#e5e7eb' };
+  const debug = engine.getCommandDebug(), faction = engine.getFactionDebugOptions(), text = { color: '#e5e7eb' };
   return <View style={{ padding: 12, gap: 8, backgroundColor: '#243044' }}>
     <Text style={text}>Round {state.round}/{flow.rules.maximumBattleRounds} · Turn {state.turn} · Phase #{flow.phaseIndex}</Text>
     <Text style={text}>Command step: {flow.commandStep ?? '—'} · Boundary: {flow.boundary}</Text>
@@ -26,6 +26,9 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
       </View>)}
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
+    {faction.euphoric.map(id=><Button key={`euphoric-${id}`} title={`EUPHORIC STRIKES · ${id}`} onPress={()=>report(engine.activateEuphoricStrikes(id),'Euphoric Strikes activated.')} />)}
+    {faction.crescendo.map(({unitId,targetId})=><Button key={`crescendo-${targetId}`} title={`TERRIFYING CRESCENDO · ${targetId}`} onPress={()=>report(engine.useTerrifyingCrescendo(unitId,targetId),'Terrifying Crescendo resolved.')} />)}
+    {faction.doomSiren.map(({unitId,targetId})=><Button key={`doom-${targetId}`} title={`DOOM SIREN · ${targetId}`} onPress={()=>report(engine.useDoomSiren(unitId,targetId,rng),'Doom Siren resolved.')} />)}
     {flow.window?.trigger==='AFTER_ENEMY_MOVE' && state.units.filter(u=>u.playerId!==state.activePlayerId&&sourceAbilities(state,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST')).map(u=><Button key={u.id} title={`PATH OF THE OUTCAST · ${u.id}`} onPress={()=>report(engine.usePathOfTheOutcast(u.id,rng),'Rangers reaction rolled.')} />)}
     {state.battleFocus && flow.window?.trigger==='AFTER_ENEMY_FALL_BACK' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`OPPORTUNITY SEIZED · ${u.id}`} onPress={()=>report(engine.useAgileManoeuvre('OPPORTUNITY_SEIZED',u.id,'ENEMY_FALL_BACK',undefined,rng),'Reaction move rolled.')} />)}
     {state.battleFocus && flow.window?.trigger==='AFTER_UNIT_SHOT' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`FADE BACK · ${u.id}`} onPress={()=>report(engine.useAgileManoeuvre('FADE_BACK',u.id,'AFTER_ENEMY_SHOT',undefined,rng),'Reaction move rolled.')} />)}

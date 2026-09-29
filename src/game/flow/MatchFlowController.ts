@@ -66,7 +66,7 @@ export class MatchFlowController {
     if (endTurn) { flowEvent(s, 'TURN_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'TURN_END'); }
     if (endRound) { flowEvent(s, 'BATTLE_ROUND_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'ROUND_END'); }
     if (endRound && s.round >= f.rules.maximumBattleRounds) { s.status = 'finished'; f.boundary = 'NONE'; return { ok: true, value: undefined }; }
-    Object.assign(s, advancePhase(s)); f.phaseIndex++; f.boundary = 'NONE';
+    Object.assign(s, advancePhase(s)); f.phaseIndex++; delete f.battleShockResolvedPhase; f.boundary = 'NONE';
     if (endRound) { for (const p of s.players) p.extraCpGainedThisBattleRound = 0; resetBattleFocus(s); flowEvent(s, 'BATTLE_ROUND_STARTED'); }
     if (endTurn) { recordTurnEngagement(s); flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); }
     this.enterPhase(); return { ok: true, value: undefined };

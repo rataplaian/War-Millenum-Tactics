@@ -49,7 +49,7 @@ import { shootingModifiers } from '../terrain/attackModifiers';
 import { elevation } from '../terrain/geometry';
 import { CloseCombatController } from './CloseCombatController';
 import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, chargeAllowance, unitDistance, engagedTargets, type ChargeExceptions } from '../rules/closeCombat';
-import type { CommandResult, GameState, GameEvent, MovementPath, Position, WeaponResolution } from '../models';
+import type { CommandResult, GameState, GameEvent, MovementPath, Position, Unit, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
@@ -81,6 +81,24 @@ export class GameEngine {
   static create(initialState: GameState, policies: EnginePolicies = {}): GameEngine { return new GameEngine(initialState, policies); }
   loadMatch(snapshot: GameState): void { validateState(snapshot); this.state = copy(snapshot); }
   getState(): GameState { return copy(this.state); }
+  /** Read-only choices for faction debug controls; commands remain authoritative. */
+  getFactionDebugOptions() {
+    const s=this.state,w=s.flow?.window,selected=s.closeCombat?.fight?.selected;
+    const aliveAbility=(u:Unit,id:string)=>sourceAbilities(s,u).some(x=>x.ability.id===id&&u.models.some(m=>m.alive&&(m.componentUnitId??u.id)===x.sourceUnitId));
+    const euphoric=s.phase==='Fight'&&w?.trigger==='START_OF_PHASE'&&!w.passedPlayerIds.includes(s.activePlayerId)
+      ?s.units.filter(u=>u.playerId===s.activePlayerId&&onBattlefield(u)&&aliveAbility(u,'EUPHORIC_STRIKES')&&!s.flow?.effects.some(e=>e.source==='EUPHORIC_STRIKES'&&u.models.some(m=>m.id===e.target.modelId))).map(u=>u.id):[];
+    const fighting=selected&&s.units.find(u=>u.id===selected.unitId);
+    const exquisite=!!fighting&&s.phase==='Fight'&&fighting.state.hasCharged&&hasFactionRule(s,fighting,'EXQUISITE_SWORDSMANSHIP')&&!selected?.hasRolled&&!selected?.exquisiteChoice;
+    const patrons=!!fighting&&s.phase==='Fight'&&!selected?.hasRolled&&aliveAbility(fighting,'DAEMONIC_PATRONS')&&!s.daemonPatrons?.some(p=>p.unitId===fighting.id&&p.phaseIndex===(s.flow?.phaseIndex??s.turn*5+4));
+    const shooter=w?.trigger==='AFTER_UNIT_SHOT'&&s.units.find(u=>u.id===w.unitId);
+    const canChoose=!!shooter&&shooter.playerId===s.activePlayerId&&!w?.passedPlayerIds.includes(s.activePlayerId);
+    const lastStart=shooter?s.events.reduce((latest,e,index)=>e.type==='shooting-started'&&e.unitId===shooter.id&&e.turn===s.turn?index:latest,-1):-1;
+    return { euphoric, exquisite, patrons:patrons?fighting!.id:null,
+      crescendo:canChoose&&aliveAbility(shooter!,'TERRIFYING_CRESCENDO')&&!s.flow?.effects.some(e=>e.source===`TERRIFYING_CRESCENDO:${shooter!.id}:${s.turn}`)
+        ?postShotHitTargets(s,shooter!).map(u=>({unitId:shooter!.id,targetId:u.id})):[],
+      doomSiren:canChoose&&aliveAbility(shooter!,'DOOM_SIREN')&&!s.events.slice(lastStart+1).some(e=>e.type==='flow'&&e.name==='DOOM_SIREN_RESOLVED'&&e.unitId===shooter!.id)
+        ?postShotHitTargets(s,shooter!,'INFANTRY').map(u=>({unitId:shooter!.id,targetId:u.id})):[] };
+  }
   useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource, reroll = false) {
     return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng,reroll));
   }

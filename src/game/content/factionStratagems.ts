@@ -1,7 +1,7 @@
 import type { StratagemDefinition, StratagemPolicies } from '../stratagems/types';
 import type { CommandResult, GameState, Unit } from '../models';
 import { failure } from '../rules/movement';
-import { applyEffect } from '../effects/EffectEngine';
+import { applyEffect, effectiveCharacteristic } from '../effects/EffectEngine';
 import { modelWithinObjective } from '../missions/objectives';
 import { moveUnitToReserves } from '../reserves/ReserveController';
 import { modelDefinition, unitKeywords } from '../attachments/queries';
@@ -54,7 +54,11 @@ export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_S
     NOT_ENGAGED:(s,_p,ids)=>ids.every(id=>!isUnitEngaged(s,living(s,id))),
     WINDOW_UNIT:(s,_p,ids)=>ids.every(id=>s.flow?.window?.unitId===id),
     CHARGED_NOT_FOUGHT:(s,_p,ids)=>ids.every(id=>living(s,id).state.hasCharged&&!living(s,id).state.hasFought),
-    PREVIOUS_CHARGE_KILL:(s,_p,ids)=>ids.every(id=>s.events.some(e=>e.type==='combat-move-completed'&&e.kind==='charge'&&e.unitId===id&&e.turn===s.turn-1)&&s.events.some(e=>e.type==='flow'&&e.name==='UNIT_DESTROYED'&&e.turn===s.turn-1&&e.detail.attackerUnitId===id)),
+    PREVIOUS_CHARGE_KILL:(s,_p,ids)=>ids.every(id=>s.events.some(e=>e.type==='combat-move-completed'&&e.kind==='charge'&&e.unitId===id&&e.turn===s.turn-1)&&s.events.some(e=>{
+      if(e.type!=='flow'||e.name!=='UNIT_DESTROYED'||e.turn!==s.turn-1||e.detail.attackerUnitId!==id)return false;
+      const phase=[...s.events].reverse().find(start=>start.sequence<e.sequence&&start.type==='flow'&&start.name==='PHASE_STARTED'&&start.turn===e.turn);
+      return phase?.type==='flow'&&phase.detail.phase==='Fight';
+    })),
     CHARGE_REACTION_ELIGIBLE:(s,_p,ids)=>ids.every(id=>{const u=living(s,id),fallen=s.units.find(x=>x.id===s.flow?.window?.unitId);if(!fallen || unitKeywords(s,u).includes('VEHICLE')&&!unitKeywords(s,u).includes('WALKER') || !u.models.some(m=>m.alive&&fallen.models.some(n=>n.alive&&edgeDistance(m,n)<=6+EPSILON)))return false;
       const draft:GameState=JSON.parse(JSON.stringify(s));draft.closeCombat ??= emptyCloseCombat();draft.closeCombat.reaction={unitId:id,targetUnitId:fallen.id,source:'CUT_DOWN_THE_WEAK'};return canDeclareCharge(draft,id).ok;}),
   },
@@ -78,9 +82,11 @@ export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_S
       return charge.ok ? {ok:true,value:undefined} : charge;},
     TERRIFYING_SPECTACLE:(s,ids,_d,rng)=>{if(!rng)return failure('INVALID_CONFIGURATION');const u=living(s,ids[0]!),outcomes=[];
       for(const enemy of s.units.filter(v=>v.playerId!==u.playerId&&v.models.some(m=>m.alive&&u.models.some(n=>n.alive&&edgeDistance(m,n)<=6+EPSILON)))){
-        const roll=resolveBattleShockRoll(s,enemy,rng),penalty=isBelowHalfStrength(s,enemy)?1:0,lead=Math.min(...enemy.models.filter(m=>m.alive).map(m=>m.leadership??modelDefinition(s,enemy,m).stats.leadership));
+        const roll=resolveBattleShockRoll(s,enemy,rng),penalty=isBelowHalfStrength(s,enemy)?1:0,lead=Math.min(...enemy.models.filter(m=>m.alive).map(m=>effectiveCharacteristic(s,enemy.id,'LEADERSHIP',m.leadership??modelDefinition(s,enemy,m).stats.leadership,m.id)));
         enemy.state.battleShocked=roll.total-penalty<lead;
         s.flow!.pending=s.flow!.pending.filter(p=>p.kind!=='BATTLE_SHOCK'||p.unitId!==enemy.id);
+        const resolved=s.flow!.battleShockResolvedPhase??={phaseIndex:s.flow!.phaseIndex,unitIds:[]};
+        if(!resolved.unitIds.includes(enemy.id))resolved.unitIds.push(enemy.id);
         outcomes.push(enemy.id);flowEvent(s,'BATTLE_SHOCK_ROLL_RESOLVED',{rolls:roll.rolls,total:roll.total,penalty,success:!enemy.state.battleShocked,source:'TERRIFYING_SPECTACLE'},enemy.id,enemy.playerId);
       }return {ok:true,value:undefined};},
   },

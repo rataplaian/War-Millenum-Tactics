@@ -13,6 +13,8 @@ export interface MatchFlowState {
   rules: FlowRules; pending: PendingResolution[]; window: TimingWindow | null; queuedWindows: TimingWindow[];
   boundary: 'NONE' | 'PHASE_END' | 'TURN_END'; started: boolean; missionHookStarted: boolean;
   resolvedAbilities: string[];
+  /** Units which have already resolved a Battle-shock test in this Command phase. */
+  battleShockResolvedPhase?: { phaseIndex: number; unitIds: string[] };
   effects: Effect[]; nextEffectId: number; nextWindowId: number;
   usage: { stratagemId: string; playerId: string; targetIds: string[]; phaseIndex: number; turn: number; round: number }[];
 }

@@ -24,6 +24,7 @@ export function validateFlowState(s: GameState) {
     (f.boundary !== 'NONE' && (f.commandStep || f.pending.length)) || (!f.window && f.queuedWindows.length)) fail();
   if (f.started && s.phase === 'Command' && f.commandStep === null && !s.events.some(e => e.type === 'flow' && e.name === 'COMMAND_STEP_COMPLETED' && e.turn === s.turn && e.detail.step === 'END_OF_COMMAND_PHASE')) fail();
   if (!Array.isArray(f.resolvedAbilities) || new Set(f.resolvedAbilities).size !== f.resolvedAbilities.length || f.resolvedAbilities.some(id => typeof id !== 'string' || !id)) fail();
+  if (f.battleShockResolvedPhase && (f.battleShockResolvedPhase.phaseIndex !== f.phaseIndex || new Set(f.battleShockResolvedPhase.unitIds).size !== f.battleShockResolvedPhase.unitIds.length || f.battleShockResolvedPhase.unitIds.some(id => !unit(id)))) fail();
   if (new Set(f.pending.map(p => p.id)).size !== f.pending.length) fail();
   for (const p of f.pending) {
     if (!p.id || !p.label || !['BATTLE_SHOCK', 'ABILITY', 'MISSION_HOOK', 'RULE'].includes(p.kind) || (p.unitId && !unit(p.unitId))) fail();

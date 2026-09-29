@@ -2,6 +2,7 @@ import { Button, Text, View } from 'react-native';
 import type { GameState, CommandResult } from '../game/models';
 import type { GameEngine } from '../game/engine/GameEngine';
 import type { RandomSource } from '../game/utils/dice';
+import { sourceAbilities } from '../game/attachments/queries';
 export function CommandPanel({ state, engine, rng, report }: { state: GameState; engine: GameEngine; rng: RandomSource; report: (r: CommandResult<unknown>, message: string) => void }) {
   const flow = state.flow; if (!flow) return null;
   const debug = engine.getCommandDebug(), text = { color: '#e5e7eb' };
@@ -23,8 +24,8 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
       </View>)}
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
-    {flow.window?.trigger==='AFTER_ENEMY_MOVE' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`PATH OF THE OUTCAST · ${u.id}`} onPress={()=>report(engine.usePathOfTheOutcast(u.id,rng),'Rangers reaction rolled.')} />)}
-    {flow.window?.trigger==='END_OF_PHASE' && state.phase==='Movement' && state.units.filter(u=>u.playerId===state.activePlayerId).map(u=><View key={u.id}>{state.units.filter(target=>target.playerId!==u.playerId).map(target=><Button key={target.id} title={`GUIDE ${u.id} → ${target.id}`} onPress={()=>report(engine.useGuide(u.id,target.id),'Guide applied.')} />)}</View>)}
+    {flow.window?.trigger==='AFTER_ENEMY_MOVE' && state.units.filter(u=>u.playerId!==state.activePlayerId&&sourceAbilities(state,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST')).map(u=><Button key={u.id} title={`PATH OF THE OUTCAST · ${u.id}`} onPress={()=>report(engine.usePathOfTheOutcast(u.id,rng),'Rangers reaction rolled.')} />)}
+    {flow.window?.trigger==='END_OF_PHASE' && state.phase==='Movement' && state.units.filter(u=>u.playerId===state.activePlayerId&&sourceAbilities(state,u).some(x=>x.ability.id==='GUIDE')).map(u=><View key={u.id}>{state.units.filter(target=>target.playerId!==u.playerId).map(target=><Button key={target.id} title={`GUIDE ${u.id} → ${target.id}`} onPress={()=>report(engine.useGuide(u.id,target.id),'Guide applied.')} />)}</View>)}
     {state.attackJob && flow.window && ['AFTER_HIT_ROLL','AFTER_WOUND_ROLL','AFTER_DAMAGE_ROLL'].includes(flow.window.trigger) && <View style={{gap:5}}>
       <Button title="BRANCHING FATES · REPLACE DIE WITH SIX" onPress={()=>report(engine.useBranchingFates(),'Branching Fates used.')} />
       <Button title="ASPECT SHRINE · REPLACE DIE WITH SIX" onPress={()=>report(engine.spendAspectShrineToken(),'Aspect Shrine token spent.')} />

@@ -57,6 +57,28 @@ test('Guardian and Peerless catalogs expose exactly six unique stratagems each',
   assert.equal(new Set(FACTION_STRATAGEMS.map(s=>s.id)).size,12);
   for(const s of FACTION_STRATAGEMS) assert.ok(s.cpCost>0 && s.resolverId && s.timing.triggers.length>0);
 });
+test('Warding Salvoes applies its objective wound permission only after spending CP',()=>{
+  const e=fixture('Shooting');reachPhaseStart(e);
+  const before=e.getState();
+  assert.equal(e.useStratagem('WARDING_SALVOES','player-2',['unit-2']).ok,false);
+  assert.deepEqual(e.getState(),before);
+  ok(e.useStratagem('WARDING_SALVOES','player-1',['unit-1']));
+  assert.equal(e.getState().players[0]!.commandPoints,3);
+  assert.equal(effectiveFlag(e.getState(),'unit-1','OBJECTIVE_WOUND_REROLL'),true);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Cruel Bladesman requires a charging unit that has not fought',()=>{
+  const e=fixture('Fight');reachPhaseStart(e);
+  const unchanged=e.getState();
+  assert.equal(e.useStratagem('CRUEL_BLADESMAN','player-1',['unit-1']).ok,false);
+  assert.deepEqual(e.getState(),unchanged);
+  const s=createTestMatch();s.phase='Fight';s.players[0]!.commandPoints=4;
+  s.stratagemDefinitions=[...FACTION_STRATAGEMS];s.units[0]!.state.hasCharged=true;
+  s.definitions=s.definitions.map((d,i)=>i===0?{...d,keywords:[...d.keywords,'EMPERORS_CHILDREN']}:d);
+  const e2=engine(s);reachPhaseStart(e2);
+  ok(e2.useStratagem('CRUEL_BLADESMAN','player-1',['unit-1']));
+  assert.equal(effectiveFlag(e2.getState(),'unit-1','MELEE_AP_BONUS'),true);
+});
 test('Time to Strike uses the engine Advance transaction without consuming a die',()=>{
   const e=fixture('Movement');reachPhaseStart(e);
   ok(e.useStratagem('TIME_TO_STRIKE','player-1',['unit-1']));

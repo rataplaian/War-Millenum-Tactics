@@ -28,7 +28,7 @@ export function validateShootingState(state: GameState): void {
         !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn ||
         event.round !== Math.floor((event.turn - 1) / 2) + 1 ||
         (!SETUP_EVENT_TYPES.some(t => t === event.type) && !['model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost'].includes(event.type) && !event.type.startsWith('combat-') && !event.type.startsWith('fight-') && !event.type.startsWith('melee-') && !event.type.startsWith('charge-') && event.type !== 'overrun-fight' &&
-          !(event.type==='weapon-fired' && activeReactions.has(`${event.turn}:${event.unitId}`)) &&
+          !(['weapon-fired','model-damaged','model-destroyed','cover-applied','plunging-fire-applied'].includes(event.type) && activeReactions.has(`${event.turn}:${event.unitId}`)) &&
           state.players[((event.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id !== event.playerId)) throw new Error('Invalid event context');
     if (event.type === 'weapon-fired' || event.type === 'model-damaged' || event.type === 'model-destroyed') {
       const weaponId = event.type === 'weapon-fired' ? event.resolution.weaponId : event.weaponId;

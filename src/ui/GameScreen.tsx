@@ -72,6 +72,10 @@ export function GameScreen() {
       if (current.closeCombat.move.unitId !== unitId) { setMessage('Select a model from the moving unit.'); return; }
       setSelectedModelId(modelId); setTarget(null); return;
     }
+    if(current.reactionMove){
+      if(current.reactionMove.unitId!==unitId){setMessage('Select a model from the reacting unit.');return;}
+      setSelectedModelId(modelId);setTarget(null);return;
+    }
     if (!current.movement) {
       const result = engine.current!.beginMovement(unitId);
       report(result, 'Model selected. Tap its destination.');
@@ -87,6 +91,10 @@ export function GameScreen() {
     if (engine.current!.getState().closeCombat?.move) {
       const result = engine.current!.moveCombatModel(selectedModelId, position);
       setTarget({ position, legal: result.ok }); report(result, 'Position accepted. Complete movement to validate the final formation.'); return;
+    }
+    if(engine.current!.getState().reactionMove){
+      const result=engine.current!.moveReactionModel(selectedModelId,position);
+      setTarget({position,legal:result.ok});report(result,'Reaction position accepted.');return;
     }
     const result = engine.current!.moveModel(selectedModelId, position);
     setTarget({ position, legal: result.ok });
@@ -109,7 +117,8 @@ export function GameScreen() {
       <CommandPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />
       <MissionPanel state={state} engine={engine.current!} report={report} />
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
-      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
+      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move || state.reactionMove) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move || state.reactionMove) move(position); }} />
+      {state.reactionMove && <Button title="COMPLETE REACTION MOVE" onPress={()=>report(engine.current!.completeReactionMove(),'Reaction move completed.')} />}
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>
       <TerrainDebugPanel state={state} engine={engine.current!} observerId={observerId} onObserver={setObserverId} targetZ={targetZ} onTargetZ={setTargetZ} onDestination={move} />
       {state.units.filter(onBattlefield).map(unit => {

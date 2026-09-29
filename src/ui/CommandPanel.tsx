@@ -23,6 +23,12 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
       </View>)}
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
+    {flow.window?.trigger==='AFTER_ENEMY_MOVE' && state.units.filter(u=>u.playerId!==state.activePlayerId).map(u=><Button key={u.id} title={`PATH OF THE OUTCAST · ${u.id}`} onPress={()=>report(engine.usePathOfTheOutcast(u.id,rng),'Rangers reaction rolled.')} />)}
+    {flow.window?.trigger==='END_OF_PHASE' && state.phase==='Movement' && state.units.filter(u=>u.playerId===state.activePlayerId).map(u=><View key={u.id}>{state.units.filter(target=>target.playerId!==u.playerId).map(target=><Button key={target.id} title={`GUIDE ${u.id} → ${target.id}`} onPress={()=>report(engine.useGuide(u.id,target.id),'Guide applied.')} />)}</View>)}
+    {state.attackJob && flow.window && ['AFTER_HIT_ROLL','AFTER_WOUND_ROLL','AFTER_DAMAGE_ROLL'].includes(flow.window.trigger) && <View style={{gap:5}}>
+      <Button title="BRANCHING FATES · REPLACE DIE WITH SIX" onPress={()=>report(engine.useBranchingFates(),'Branching Fates used.')} />
+      <Button title="ASPECT SHRINE · REPLACE DIE WITH SIX" onPress={()=>report(engine.spendAspectShrineToken(),'Aspect Shrine token spent.')} />
+    </View>}
     {state.reactionShooting && <View style={{gap:5}}>
       <Text style={text}>Reaction: {state.reactionShooting.source} · {state.reactionShooting.unitId} → {state.reactionShooting.targetUnitId}</Text>
       {(() => { const options=engine.getReactionShootingOptions();return options.ok ? options.value.map(o=><Button key={o.weaponId} title={`FIRE ${o.weaponId}${o.reason ? ` · ${o.reason}` : ''}`} disabled={!o.legal} onPress={()=>report(engine.fireReactionWeapon(o.weaponId,rng),'Reaction weapon resolved.')} />) : <Text style={text}>{options.reason}</Text>; })()}

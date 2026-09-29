@@ -49,6 +49,11 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
       </>}
       {chosen && !combat?.move && <>
         <Text style={{ color: '#fff' }}>Fighting: {label(chosen.id)}</Text>
+        {chosen.playerId===state.activePlayerId && <View style={{gap:4}}>
+          <Button title="EXQUISITE SWORDSMANSHIP · LETHAL HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('LETHAL_HITS'))} />
+          <Button title="EXQUISITE SWORDSMANSHIP · SUSTAINED HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('SUSTAINED_HITS'))} />
+          <Button title="DAEMONIC PATRONS" onPress={()=>run(engine.activateDaemonicPatrons(chosen.id))} />
+        </View>}
         {enemies.filter(u => u.playerId !== chosen.playerId).map(target => <View key={target.id} style={{ gap: 4 }}>
           <Button title={`${targets.includes(target.id) ? '✓ ' : ''}OVERRUN TARGET: ${label(target.id)}`} onPress={() => toggle(target.id)} />
           {meleeWeapons(state, chosen).map(w => <View key={w.id}><Button key={w.id} title={`${w.name} → ${label(target.id)}`}

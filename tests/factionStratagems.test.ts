@@ -30,6 +30,8 @@ test('Vaul\u2019s Vengeance reacts after a Guardian is destroyed, locks the atta
   assert.equal(e.getState().players[1]!.commandPoints,1);
   assert.deepEqual(e.getReactionShootingOptions(),{ok:true,value:[{weaponId:'test-rifle',legal:true,reason:undefined}]});
   assert.equal(e.fireReactionWeapon('test-rifle',()=>.99).ok,true);
+  assert.equal(e.getState().events.some(x=>x.type==='model-damaged'&&x.unitId==='walker'),true);
+  assert.equal(e.getState().units.find(u=>u.id==='walker')?.lastRangedAttackTurnIndex,e.getState().turn);
   const usedOptions=e.getReactionShootingOptions();
   assert.equal(usedOptions.ok,true);
   if(usedOptions.ok)assert.equal(usedOptions.value[0]?.reason,'WEAPON_ALREADY_FIRED');

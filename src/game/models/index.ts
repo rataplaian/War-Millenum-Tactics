@@ -126,6 +126,8 @@ export type GameStatus = 'in-progress' | 'finished';
 export interface GameState {
   /** Voluntary Fight-phase pacts awaiting their end-of-phase consequence. */
   daemonPatrons?: {unitId:string;phaseIndex:number;fromSequence:number}[];
+  /** A locked target for a voluntary out-of-phase Shooting activation. */
+  reactionShooting?: {source:string;unitId:string;targetUnitId:string;firedWeaponIds:string[];hazardousCount?:number} | null;
   /** Roster-owned enhancement IDs keyed by original source unit (survive attachment/split). */
   enhancements?: Record<string,string>;
   /** Destroyed melee defenders that must strike after their attacker completes its activation. */

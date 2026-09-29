@@ -15,16 +15,21 @@ export function validateShootingState(state: GameState): void {
       !Number.isFinite(b.width) || b.width <= 0 || !Number.isFinite(b.height) || b.height <= 0 ||
       b.position.x < 0 || b.position.y < 0 || b.position.x + b.width > state.battlefield.width ||
       b.position.y + b.height > state.battlefield.height)) throw new Error('Invalid LOS blocker');
+  const activeReactions=new Set<string>();
   for (const [i, event] of state.events.entries()) {
     if (event.type === 'flow') {
       if (event.sequence !== i + 1 || !state.players.some(p => p.id === event.playerId) || (event.unitId && !historicalUnit(state, event.unitId)) || !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn || event.round !== Math.floor((event.turn - 1) / 2) + 1) throw new Error('Invalid flow event context');
+      if(event.name==='REACTION_SHOOTING_STARTED'&&event.unitId)activeReactions.add(`${event.turn}:${event.unitId}`);
+      if(event.name==='REACTION_SHOOTING_COMPLETED'&&event.unitId)activeReactions.delete(`${event.turn}:${event.unitId}`);
       continue;
     }
     const source = historicalUnit(state, event.unitId);
     if (!EVENT_TYPES.includes(event.type) || event.sequence !== i + 1 || !source || event.playerId !== source.playerId ||
         !Number.isSafeInteger(event.turn) || event.turn < 1 || event.turn > state.turn ||
         event.round !== Math.floor((event.turn - 1) / 2) + 1 ||
-        (!SETUP_EVENT_TYPES.some(t => t === event.type) && !['model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost'].includes(event.type) && !event.type.startsWith('combat-') && !event.type.startsWith('fight-') && !event.type.startsWith('melee-') && !event.type.startsWith('charge-') && event.type !== 'overrun-fight' && state.players[((event.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id !== event.playerId)) throw new Error('Invalid event context');
+        (!SETUP_EVENT_TYPES.some(t => t === event.type) && !['model-entered-terrain-area', 'model-left-terrain-area', 'model-changed-elevation', 'hidden-gained', 'hidden-lost'].includes(event.type) && !event.type.startsWith('combat-') && !event.type.startsWith('fight-') && !event.type.startsWith('melee-') && !event.type.startsWith('charge-') && event.type !== 'overrun-fight' &&
+          !(event.type==='weapon-fired' && activeReactions.has(`${event.turn}:${event.unitId}`)) &&
+          state.players[((event.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id !== event.playerId)) throw new Error('Invalid event context');
     if (event.type === 'weapon-fired' || event.type === 'model-damaged' || event.type === 'model-destroyed') {
       const weaponId = event.type === 'weapon-fired' ? event.resolution.weaponId : event.weaponId;
       const targetId = event.type === 'weapon-fired' ? event.resolution.targetUnitId : event.targetUnitId;

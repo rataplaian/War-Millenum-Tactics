@@ -23,7 +23,7 @@ const effect=(s:GameState,id:string,source:string,flag:string,expiry:'END_OF_CUR
 export const GUARDIAN_STRATAGEMS: readonly StratagemDefinition[]=[
   {id:'WARDING_SALVOES',name:'Warding Salvoes',labels:['BATTLE_TACTIC'],cpCost:1,timing:timing(['Shooting','Fight'],['START_OF_PHASE'],'YOUR_TURN'),target:{...guardian,keywordAny:['DIRE_AVENGERS','GUARDIANS']},conditions:['ON_BATTLEFIELD','ALIVE'],restrictions:['NOT_SELECTED'],resolverId:'WARDING_SALVOES'},
   {id:'SHIELD_NODES',name:'Shield Nodes',labels:['BATTLE_TACTIC'],cpCost:1,timing:timing(['Shooting','Fight'],['AFTER_TARGET_SELECTED'],'OPPONENT_TURN'),target:{...guardian,selectedTargetOnly:true,keywordAny:['DIRE_AVENGERS','GUARDIANS']},conditions:['ON_BATTLEFIELD','ALIVE'],restrictions:['OBJECTIVE_RANGE'],resolverId:'SHIELD_NODES'},
-  {id:'VAULS_VENGEANCE',name:"Vaul's Vengeance",labels:['BATTLE_TACTIC'],cpCost:1,timing:timing(['Shooting','Fight'],['AFTER_ENEMY_DESTROYED'],'OPPONENT_TURN'),target:{...guardian,keywords:['WAR_WALKERS']},conditions:['ON_BATTLEFIELD','ALIVE'],usageLimits:{perBattleRound:1},resolverId:'VAULS_VENGEANCE'},
+  {id:'VAULS_VENGEANCE',name:"Vaul's Vengeance",labels:['BATTLE_TACTIC'],cpCost:1,timing:timing(['Shooting','Fight'],['AFTER_ENEMY_DESTROYED'],'OPPONENT_TURN'),target:{...guardian,keywords:['WAR_WALKERS']},conditions:['ON_BATTLEFIELD','ALIVE'],restrictions:['VENGEANCE_WINDOW'],usageLimits:{perBattleRound:1},resolverId:'VAULS_VENGEANCE'},
   {id:'TIME_TO_STRIKE',name:'Time to Strike',labels:['STRATEGIC_PLOY'],cpCost:1,timing:timing(['Movement'],['START_OF_PHASE'],'YOUR_TURN'),target:{...guardian,keywords:['STORM_GUARDIANS']},conditions:['ON_BATTLEFIELD','ALIVE'],restrictions:['NOT_MOVED'],resolverId:'TIME_TO_STRIKE'},
   {id:'BLADES_OF_ASURYAN',name:'Blades of Asuryan',labels:['BATTLE_TACTIC'],cpCost:1,timing:timing(['Shooting'],['START_OF_PHASE'],'YOUR_TURN'),target:{...guardian,keywordAny:['DIRE_AVENGERS','GUARDIANS']},conditions:['ON_BATTLEFIELD','ALIVE','NOT_SHOT'],resolverId:'APPLY_EFFECT',effect:{source:'BLADES_OF_ASURYAN',payload:{kind:'FLAG',flag:'RANGED_PISTOL',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'REPLACE_SAME_SOURCE'}},
   {id:'COST_OF_VICTORY',name:'Cost of Victory',labels:['STRATEGIC_PLOY'],cpCost:1,timing:timing(['Fight'],['END_OF_PHASE'],'OPPONENT_TURN'),target:{...guardian,keywords:['GUARDIANS']},conditions:['ON_BATTLEFIELD','ALIVE'],restrictions:['NOT_ENGAGED'],resolverId:'COST_OF_VICTORY'},
@@ -40,6 +40,13 @@ export const FACTION_STRATAGEMS=[...GUARDIAN_STRATAGEMS,...PEERLESS_STRATAGEMS] 
 export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_STRATAGEMS,
   restrictions:{
     NOT_SELECTED:(s,_p,ids)=>ids.every(id=>{const u=living(s,id);return s.phase==='Shooting'?!u.selectedToShootAt||u.selectedToShootAt.turn!==s.turn:!u.state.hasFought&&!s.closeCombat?.fight?.selected;}),
+    VENGEANCE_WINDOW:(s,p,ids)=>!!s.flow?.window?.unitId && !!s.flow.window.targetUnitId && !s.reactionShooting && ids.every(id=>{
+      const lost=s.units.find(u=>u.id===s.flow!.window!.targetUnitId),attacker=s.units.find(u=>u.id===s.flow!.window!.unitId);
+      return !!lost && !!attacker && lost.playerId===p && attacker.playerId!==p &&
+        !lost.models.some(m=>m.alive) && attacker.models.some(m=>m.alive) &&
+        s.definitions.find(d=>d.id===lost.definitionId)?.keywords.some(k=>['DIRE_AVENGERS','GUARDIANS'].includes(k.toUpperCase())) &&
+        s.units.some(u=>u.id===id&&u.playerId===p);
+    }),
     OBJECTIVE_RANGE:(s,_p,ids)=>ids.every(id=>withinObjective(s,living(s,id))),
     NOT_MOVED:(s,_p,ids)=>ids.every(id=>!living(s,id).state.hasMoved&&!s.movement),
     NOT_ENGAGED:(s,_p,ids)=>ids.every(id=>!isUnitEngaged(s,living(s,id))),
@@ -50,6 +57,12 @@ export const FACTION_STRATAGEM_POLICIES:StratagemPolicies={definitions:FACTION_S
       const draft:GameState=JSON.parse(JSON.stringify(s));draft.closeCombat ??= emptyCloseCombat();draft.closeCombat.reaction={unitId:id,targetUnitId:fallen.id,source:'CUT_DOWN_THE_WEAK'};return canDeclareCharge(draft,id).ok;}),
   },
   resolvers:{
+    VAULS_VENGEANCE:(s,ids)=>{
+      const unitId=ids[0]!,targetUnitId=s.flow!.window!.unitId!;
+      s.reactionShooting={source:'VAULS_VENGEANCE',unitId,targetUnitId,firedWeaponIds:[]};
+      flowEvent(s,'REACTION_SHOOTING_STARTED',{source:'VAULS_VENGEANCE',targetUnitId},unitId,living(s,unitId).playerId);
+      return {ok:true,value:undefined};
+    },
     WARDING_SALVOES:(s,ids)=>{effect(s,ids[0]!,'WARDING_SALVOES','OBJECTIVE_WOUND_REROLL');return {ok:true,value:undefined};},
     SHIELD_NODES:(s,ids)=>{effect(s,ids[0]!,'SHIELD_NODES','DEFENDER_WOUND_PENALTY');return {ok:true,value:undefined};},
     TIME_TO_STRIKE:(s,ids)=>{effect(s,ids[0]!,'TIME_TO_STRIKE','FIXED_ADVANCE_SIX');effect(s,ids[0]!,'TIME_TO_STRIKE','AFTER_ADVANCE_SHOOT_CHARGE','END_OF_CURRENT_TURN');return {ok:true,value:undefined};},

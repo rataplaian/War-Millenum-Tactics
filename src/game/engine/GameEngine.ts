@@ -18,7 +18,7 @@ import { attachmentFor, historicalUnit, modelDefinition, modelHasWeapon, modelKe
 import { allocationGroups } from '../attachments/AllocationGroups';
 import { TransportController, embark, detectDestroyedTransports } from '../transports/TransportController';
 import { passengers, remainingTransportCapacity, capacityDefinition } from '../transports/capacity';
-import { selectFiringDeck, firingDeckOptions } from '../transports/FiringDeck';
+import { selectFiringDeck, firingDeckOptions, rangedLoadout } from '../transports/FiringDeck';
 import { resolveHazardRolls } from '../transports/HazardRoll';
 import { rollD6, rollD6s } from '../utils/dice';
 import { resolveMortalWounds } from '../combat/damage';
@@ -62,6 +62,7 @@ import { applyShootingOnHitEffects } from '../content/onHitEffects';
 import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
 import { rollStrategistDie } from '../content/strategist';
 import { branchingFatesSource, branchingFatesStamp } from '../content/branchingFates';
+import { fireReactionWeapon as resolveReactionWeapon, reactionShootingView } from '../combat/reactionShooting';
 import { validateTerrainPath } from '../terrain/movement';
 import { isFinitePosition, EPSILON } from '../utils/geometry';
 import { availableRangedWeapons, validateShooter, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
@@ -573,6 +574,7 @@ export class GameEngine {
     finishAttacker(draft, unitId); releaseDestructions(draft, unitId);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
+    this.openVengeanceWindow(draft,unitId,'shooting-started','weapon-fired');
     openWindow(draft, 'AFTER_UNIT_SHOT', { unitId }); this.commit(draft);
     return { ok: true, value: undefined };
   }
@@ -627,6 +629,48 @@ export class GameEngine {
   }
   skipTacticalMove(id: string) { return this.combatCommand(c => c.skipTacticalMove(id)); }
   selectFightUnit(id: string) { return this.combatCommand(c => c.selectFightUnit(id)); }
+  /** A locked target; each ranged profile is resolved with the ordinary attack pipeline. */
+  getReactionShootingOptions(): CommandResult<{ weaponId:string; legal:boolean; reason?:string }[]> {
+    if (!this.state.reactionShooting) return failure('NO_ACTIVE_SHOOTING');
+    const view=reactionShootingView(this.state),tx=this.state.reactionShooting;
+    const unit=view.units.find(u=>u.id===tx.unitId)!;
+    return {ok:true,value:rangedLoadout(view,unit).map(w=>{
+      if(tx.firedWeaponIds.includes(w.id))return {weaponId:w.id,legal:false,reason:'WEAPON_ALREADY_FIRED'};
+      const result=validateShootingTarget(view,tx.unitId,w.id,tx.targetUnitId,createVisibilityProvider(view));
+      return {weaponId:w.id,legal:result.ok,reason:result.ok?undefined:result.reason};
+    })};
+  }
+  fireReactionWeapon(weaponId:string,rng:RandomSource,choices:AttackChoices={}):CommandResult<WeaponResolution> {
+    return this.flowCommand(s=>resolveReactionWeapon(s,weaponId,rng,choices));
+  }
+  completeReactionShooting(rng?:RandomSource):CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionShooting;if(!tx)return failure('NO_ACTIVE_SHOOTING');
+      if(tx.hazardousCount&&!rng)return failure('INVALID_CONFIGURATION');
+      if(tx.hazardousCount){
+        const before=copy(s),unit=s.units.find(u=>u.id===tx.unitId)!;
+        const hazard=resolveHazardRolls(s,unit,tx.hazardousCount,rng!);
+        flowEvent(s,'HAZARD_ROLLED',{rolls:hazard.rolls,mortalWounds:hazard.mortalWounds},tx.unitId,unit.playerId);
+        queueDestructions(before,s,tx.unitId);detectDestroyedTransports(s);resolveDestructions(s,rng!);
+        processAttachmentCasualties(s);normalizeDestroyed(s);
+      }
+      s.reactionShooting=null;
+      flowEvent(s,'REACTION_SHOOTING_COMPLETED',{source:tx.source,targetUnitId:tx.targetUnitId,weapons:tx.firedWeaponIds},tx.unitId);
+      return {ok:true,value:undefined};
+    });
+  }
+  private openVengeanceWindow(s:GameState,attackerId:string,startType:'shooting-started'|'fight-unit-selected',attackType:'weapon-fired'|'melee-attack-resolved') {
+    if(!s.flow || !s.stratagemDefinitions?.some(d=>d.id==='VAULS_VENGEANCE'))return;
+    const from=[...s.events].reverse().find(e=>e.type===startType&&e.unitId===attackerId)?.sequence??0;
+    const targets=[...new Set(s.events.filter(e=>e.sequence>from&&e.unitId===attackerId&&e.type===attackType)
+      .map(e=>e.type==='weapon-fired'||e.type==='melee-attack-resolved'?e.resolution.targetUnitId:''))];
+    for(const targetId of targets){
+      const target=s.units.find(u=>u.id===targetId),attacker=s.units.find(u=>u.id===attackerId);
+      if(target&&attacker&&target.playerId!==attacker.playerId&&!target.models.some(m=>m.alive)&&
+        s.definitions.find(d=>d.id===target.definitionId)?.keywords.some(k=>['DIRE_AVENGERS','GUARDIANS'].includes(k.toUpperCase())))
+        openWindow(s,'AFTER_ENEMY_DESTROYED',{unitId:attackerId,targetUnitId:targetId});
+    }
+  }
   activateDaemonicPatrons(unitId:string):CommandResult {
     return this.flowCommand(s=>{
       const selected=s.closeCombat?.fight?.selected,u=s.units.find(u=>u.id===unitId),phaseIndex=s.flow?.phaseIndex??s.turn*5+4;
@@ -680,6 +724,7 @@ export class GameEngine {
     queueDestructions(this.state, draft, id); finishAttacker(draft, id); releaseDestructions(draft, id);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft);
+    this.openVengeanceWindow(draft,id,'fight-unit-selected','melee-attack-resolved');
     openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: id }); this.commit(draft); return result;
   }
 

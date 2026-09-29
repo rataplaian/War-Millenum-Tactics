@@ -106,6 +106,13 @@ export function validateState(state: GameState): void {
   }
   if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !historicalUnit(state, event.unitId)))) throw new Error('Invalid event sequence');
   if (state.daemonPatrons?.some(p=>!state.units.some(u=>u.id===p.unitId)||!Number.isSafeInteger(p.phaseIndex)||p.phaseIndex<0||!Number.isSafeInteger(p.fromSequence)||p.fromSequence<0||p.fromSequence>state.events.length)) throw new Error('Invalid patron pact');
+  if (state.reactionShooting){
+    const tx=state.reactionShooting,shooter=state.units.find(u=>u.id===tx.unitId),target=state.units.find(u=>u.id===tx.targetUnitId);
+    if(!state.flow || !['Shooting','Fight'].includes(state.phase)||tx.source!=='VAULS_VENGEANCE'||!shooter||!target||shooter.playerId===target.playerId||!shooter.models.some(m=>m.alive)||
+      !state.definitions.find(d=>d.id===shooter.definitionId)?.keywords.includes('WAR_WALKERS') ||
+      (tx.hazardousCount!==undefined&&(!Number.isSafeInteger(tx.hazardousCount)||tx.hazardousCount<0)) ||
+      new Set(tx.firedWeaponIds).size!==tx.firedWeaponIds.length || tx.firedWeaponIds.some(id=>!state.definitions.find(d=>d.id===shooter.definitionId)?.weapons.some(w=>w.kind==='ranged'&&w.id===id))) throw Error('Invalid reaction Shooting transaction');
+  }
   validateMissionState(state);
   validateAttackState(state);
   validateTransportState(state);

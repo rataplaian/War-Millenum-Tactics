@@ -9,6 +9,35 @@ import { CloseCombatController } from '../src/game/engine/CloseCombatController'
 import { GameEngine } from '../src/game/engine/GameEngine';
 import { HEROIC_INTERVENTION } from '../src/game/content/coreReactions';
 import { hasFightsFirst } from '../src/game/rules/closeCombat';
+import { createUnit } from '../src/game/engine/createUnit';
+
+test('Vaul\u2019s Vengeance reacts after a Guardian is destroyed, locks the attacker, and shares ranged resolution',()=>{
+  const s=createTestMatch();s.phase='Shooting';
+  s.players[1]!.factionId='AELDARI';s.armies[1]!.factionId='AELDARI';s.players[1]!.commandPoints=2;
+  const attacker={...s.definitions[0]!,keywords:['INFANTRY'],weapons:s.definitions[0]!.weapons.map(w=>({...w,armourPenetration:-4}))};
+  const guardian={...s.definitions[1]!,id:'guardian-fixture',factionId:'AELDARI',modelCount:1,keywords:['INFANTRY','AELDARI','GUARDIANS'],stats:{...s.definitions[1]!.stats,wounds:1,save:6}};
+  const walker={...attacker,id:'war-walkers-fixture',factionId:'AELDARI',modelCount:1,keywords:['AELDARI','WAR_WALKERS','VEHICLE']};
+  s.definitions=[attacker,guardian,walker];s.units[1]=createUnit(guardian,'unit-2','player-2',[{x:11,y:4.5}]);
+  s.units.push(createUnit(walker,'walker','player-2',[{x:16,y:7}]));s.armies[1]!.unitIds.push('walker');
+  s.stratagemDefinitions=[...FACTION_STRATAGEMS];
+  const e=engine(s);pass(e);
+  ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('test-rifle','unit-2'));pass(e);
+  ok(e.fireWeapon('test-rifle','unit-2',()=>.99));ok(e.completeShooting());
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_ENEMY_DESTROYED');
+  const before=e.getState();assert.equal(e.useStratagem('VAULS_VENGEANCE','player-2',['unit-1']).ok,false);assert.deepEqual(e.getState(),before);
+  ok(e.useStratagem('VAULS_VENGEANCE','player-2',['walker']));
+  assert.equal(e.getState().reactionShooting?.targetUnitId,'unit-1');
+  assert.equal(e.getState().players[1]!.commandPoints,1);
+  assert.deepEqual(e.getReactionShootingOptions(),{ok:true,value:[{weaponId:'test-rifle',legal:true,reason:undefined}]});
+  assert.equal(e.fireReactionWeapon('test-rifle',()=>.99).ok,true);
+  const usedOptions=e.getReactionShootingOptions();
+  assert.equal(usedOptions.ok,true);
+  if(usedOptions.ok)assert.equal(usedOptions.value[0]?.reason,'WEAPON_ALREADY_FIRED');
+  assert.equal(e.fireReactionWeapon('test-rifle',()=>.99).ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+  ok(e.completeReactionShooting());
+  assert.equal(e.getState().reactionShooting,null);
+});
 
 function fixture(phase: 'Movement'|'Shooting'|'Fight') {
   const s=createTestMatch();s.phase=phase;

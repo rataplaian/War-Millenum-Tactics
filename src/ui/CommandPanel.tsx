@@ -16,13 +16,18 @@ export function CommandPanel({ state, engine, rng, report }: { state: GameState;
     {state.phase === 'Command' && flow.commandStep && <Button title="ADVANCE COMMAND STEP" onPress={() => report(engine.advanceCommandStep(), 'Command step advanced.')} />}
     <Text style={text}>Timing window: {flow.window?.trigger ?? 'none'} · Queued: {flow.queuedWindows.length}</Text>
     {flow.window && state.players.map(p => <View key={p.id} style={{ gap: 5 }}>
-      <Text style={text}>Available Stratagems · {p.name} · TECHNICAL TEST DATA</Text>
+      <Text style={text}>Available Stratagems · {p.name}</Text>
       {engine.getStratagemOptions(p.id).filter(o => state.units.find(u => u.id === o.targetIds[0])?.playerId === p.id).map(o => <View key={`${o.stratagemId}:${o.targetIds.join()}`}>
         <Text style={text}>{o.name} → {o.targetIds.join(', ')}: {o.result.ok ? 'LEGAL' : o.result.reason}</Text>
         {o.result.ok && <Button title={`USE ${o.name}`} onPress={() => report(engine.useStratagem(o.stratagemId, p.id, o.targetIds), 'Stratagem used. CP spent and effect applied.')} />}
       </View>)}
       <Button title={`PASS · ${p.name}`} disabled={flow.window!.passedPlayerIds.includes(p.id)} onPress={() => report(engine.passTimingWindow(p.id), 'Timing window passed.')} />
     </View>)}
+    {state.reactionShooting && <View style={{gap:5}}>
+      <Text style={text}>Reaction: {state.reactionShooting.source} · {state.reactionShooting.unitId} → {state.reactionShooting.targetUnitId}</Text>
+      {(() => { const options=engine.getReactionShootingOptions();return options.ok ? options.value.map(o=><Button key={o.weaponId} title={`FIRE ${o.weaponId}${o.reason ? ` · ${o.reason}` : ''}`} disabled={!o.legal} onPress={()=>report(engine.fireReactionWeapon(o.weaponId,rng),'Reaction weapon resolved.')} />) : <Text style={text}>{options.reason}</Text>; })()}
+      <Button title="COMPLETE REACTION" onPress={()=>report(engine.completeReactionShooting(rng),'Reaction completed.')} />
+    </View>}
     {state.attackJob && <Button title="CONTINUE ATTACK" disabled={!!flow.window} onPress={() => report(engine.resumeAttack(rng), 'Attack continued.')} />}
     {state.destructionQueue?.some(q => !q.resolved && !q.waitForAttackerId) && <Button title="RESOLVE DESTRUCTION EFFECTS" onPress={() => report(engine.resolveDestructionEffects(rng), 'Destruction effects resolved.')} />}
     <Text style={text}>Active temporary effects</Text>

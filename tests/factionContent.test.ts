@@ -96,6 +96,19 @@ test('Branching Fates engine command replaces a paused die once per phase and su
   passOne();const finished=damage.resumeAttack(()=>.4);
   assert.equal(finished.ok,true);
   assert.equal(finished.ok?finished.value.damageResults[0]?.resolved.value:undefined,6);
+  const wound=new GameEngine(s);
+  assert.equal(wound.beginShooting(u.id).ok,true);
+  assert.equal(wound.selectShootingTarget(weapon.id,target.id).ok,true);
+  for(const p of wound.getState().players) assert.equal(wound.passTimingWindow(p.id).ok,true);
+  assert.equal(wound.fireWeapon(weapon.id,target.id,()=>.4).ok,true);
+  for(const p of wound.getState().players) assert.equal(wound.passTimingWindow(p.id).ok,true);
+  assert.equal(wound.resumeAttack(()=>.4).ok,true);
+  assert.equal(wound.getState().flow?.window?.trigger,'AFTER_WOUND_ROLL');
+  assert.equal(wound.useBranchingFates().ok,true);
+  assert.equal(wound.getState().attackJob?.current?.wound?.value,6);
+  const dead=s.units.find(x=>x.id===u.id)!.models.find(m=>m.sourceDefinitionId==='farseer')!;
+  dead.alive=false;dead.woundsRemaining=0;
+  assert.equal(branchingFatesSource(s,wound.getState().attackJob!),undefined);
 });
 test('Rangers react to a nearby completed enemy move using the shared reaction transaction',async()=>{
   const {engine,ok,pass}=await import('./flow.helpers');

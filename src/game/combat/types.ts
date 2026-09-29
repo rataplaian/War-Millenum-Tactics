@@ -37,6 +37,7 @@ export interface AttackRecord {
     automaticallyWoundedFromCriticalHit: boolean;
     save?: SaveResult;
     damage?: DiceResolution;
+    allocatedModelId?: string;
     mortalWounds: number;
     ignoredDamage: number;
     fnpRolls: number[];
@@ -63,7 +64,7 @@ export interface AttackJob {
     index: number;
     additionalRemaining: number;
     current: AttackRecord | null;
-    stage: 'HIT' | 'HIT_RESULT' | 'WOUND' | 'WOUND_RESULT' | 'DONE';
+    stage: 'HIT' | 'HIT_RESULT' | 'WOUND' | 'WOUND_RESULT' | 'DAMAGE_RESULT' | 'DONE';
     deferredMortals: {
         recordIndex: number;
         amount: number;

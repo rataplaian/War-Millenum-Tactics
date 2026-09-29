@@ -18,9 +18,10 @@ import { attachmentFor, historicalUnit, modelDefinition, modelHasWeapon, modelKe
 import { allocationGroups } from '../attachments/AllocationGroups';
 import { TransportController, embark, detectDestroyedTransports } from '../transports/TransportController';
 import { passengers, remainingTransportCapacity, capacityDefinition } from '../transports/capacity';
-import { selectFiringDeck, firingDeckOptions } from '../transports/FiringDeck';
+import { selectFiringDeck, firingDeckOptions, rangedLoadout } from '../transports/FiringDeck';
 import { resolveHazardRolls } from '../transports/HazardRoll';
-import { rollD6 } from '../utils/dice';
+import { rollD6, rollD6s } from '../utils/dice';
+import { resolveMortalWounds } from '../combat/damage';
 import { resolveBattleShockRoll } from '../command/BattleShock';
 import { flowEvent } from '../flow/events';
 import { MatchFlowController, enableFlow } from '../flow/MatchFlowController';
@@ -30,7 +31,7 @@ import type { FlowPolicies, FlowRules } from '../flow/types';
 import { StratagemEngine } from '../stratagems/StratagemEngine';
 import type { StratagemPolicies } from '../stratagems/types';
 import { gainCommandPoints, spendCommandPoints, canSpendCommandPoints } from '../resources/CommandPoints';
-import { applyEffect, effectiveCharacteristic, effectiveObjectiveControl, removeEffect } from '../effects/EffectEngine';
+import { applyEffect, effectiveCharacteristic, effectiveFlag, effectiveObjectiveControl, removeEffect } from '../effects/EffectEngine';
 import type { EffectInput } from '../effects/types';
 import { canStartAction, canCompleteAction, fallBackOptions } from '../command/BattleShock';
 import { DeploymentController, nextDeploymentPlayer } from '../deployment/DeploymentController';
@@ -47,12 +48,23 @@ import { getDetectionRange, type DetectionRangePolicy, areasForModel, isModelHid
 import { shootingModifiers } from '../terrain/attackModifiers';
 import { elevation } from '../terrain/geometry';
 import { CloseCombatController } from './CloseCombatController';
-import { getModelsEligibleToFight, getLegalChargeTargets, type ChargeExceptions } from '../rules/closeCombat';
-import type { CommandResult, GameState, GameEvent, MovementPath, Position, WeaponResolution } from '../models';
+import { getModelsEligibleToFight, getLegalChargeTargets, findChargeFormation, chargeAllowance, unitDistance, engagedTargets, type ChargeExceptions } from '../rules/closeCombat';
+import type { CommandResult, GameState, GameEvent, MovementPath, Position, Unit, WeaponResolution } from '../models';
 import { advancePhase, advanceTurn } from '../rules/progression';
 import { failure, movementPhaseError, validateBeginMovement, validateFinalPosition, validateModelMove } from '../rules/movement';
 import { checkCoherency, isUnitEngaged } from '../rules/spatial';
 import { validateState } from './validateState';
+import { hasFactionRule, recordFactionTarget } from '../content/factionRules';
+import { factionAttackWeapon } from '../content/attackAbilities';
+import { psychicCommunionBonus } from '../content/psychicCommunion';
+import { postShotHitTargets } from '../content/postShooting';
+import { applyShootingOnHitEffects } from '../content/onHitEffects';
+import { useAgileManoeuvre, type AgileManoeuvre } from '../content/BattleFocus';
+import { rollStrategistDie } from '../content/strategist';
+import { branchingFatesSource, branchingFatesStamp } from '../content/branchingFates';
+import { fireReactionWeapon as resolveReactionWeapon, reactionShootingView } from '../combat/reactionShooting';
+import { validateTerrainPath } from '../terrain/movement';
+import { isFinitePosition, EPSILON } from '../utils/geometry';
 import { availableRangedWeapons, validateShooter, legalShootingTargets, shootingPhaseError, validateRangedWeapon, validateShootingTarget } from '../rules/shootingTargets';
 import { definitionFor } from '../rules/movement';
 import { type VisibilityPolicy } from '../rules/visibility';
@@ -69,6 +81,135 @@ export class GameEngine {
   static create(initialState: GameState, policies: EnginePolicies = {}): GameEngine { return new GameEngine(initialState, policies); }
   loadMatch(snapshot: GameState): void { validateState(snapshot); this.state = copy(snapshot); }
   getState(): GameState { return copy(this.state); }
+  /** Read-only choices for faction debug controls; commands remain authoritative. */
+  getFactionDebugOptions() {
+    const s=this.state,w=s.flow?.window,selected=s.closeCombat?.fight?.selected;
+    const aliveAbility=(u:Unit,id:string)=>sourceAbilities(s,u).some(x=>x.ability.id===id&&u.models.some(m=>m.alive&&(m.componentUnitId??u.id)===x.sourceUnitId));
+    const euphoric=s.phase==='Fight'&&w?.trigger==='START_OF_PHASE'&&!w.passedPlayerIds.includes(s.activePlayerId)
+      ?s.units.filter(u=>u.playerId===s.activePlayerId&&onBattlefield(u)&&aliveAbility(u,'EUPHORIC_STRIKES')&&!s.flow?.effects.some(e=>e.source==='EUPHORIC_STRIKES'&&u.models.some(m=>m.id===e.target.modelId))).map(u=>u.id):[];
+    const fighting=selected&&s.units.find(u=>u.id===selected.unitId);
+    const exquisite=!!fighting&&s.phase==='Fight'&&fighting.state.hasCharged&&hasFactionRule(s,fighting,'EXQUISITE_SWORDSMANSHIP')&&!selected?.hasRolled&&!selected?.exquisiteChoice;
+    const patrons=!!fighting&&s.phase==='Fight'&&!selected?.hasRolled&&aliveAbility(fighting,'DAEMONIC_PATRONS')&&!s.daemonPatrons?.some(p=>p.unitId===fighting.id&&p.phaseIndex===(s.flow?.phaseIndex??s.turn*5+4));
+    const shooter=w?.trigger==='AFTER_UNIT_SHOT'&&s.units.find(u=>u.id===w.unitId);
+    const canChoose=!!shooter&&shooter.playerId===s.activePlayerId&&!w?.passedPlayerIds.includes(s.activePlayerId);
+    const lastStart=shooter?s.events.reduce((latest,e,index)=>e.type==='shooting-started'&&e.unitId===shooter.id&&e.turn===s.turn?index:latest,-1):-1;
+    return { euphoric, exquisite, patrons:patrons?fighting!.id:null,
+      crescendo:canChoose&&aliveAbility(shooter!,'TERRIFYING_CRESCENDO')&&!s.flow?.effects.some(e=>e.source===`TERRIFYING_CRESCENDO:${shooter!.id}:${s.turn}`)
+        ?postShotHitTargets(s,shooter!).map(u=>({unitId:shooter!.id,targetId:u.id})):[],
+      doomSiren:canChoose&&aliveAbility(shooter!,'DOOM_SIREN')&&!s.events.slice(lastStart+1).some(e=>e.type==='flow'&&e.name==='DOOM_SIREN_RESOLVED'&&e.unitId===shooter!.id)
+        ?postShotHitTargets(s,shooter!,'INFANTRY').map(u=>({unitId:shooter!.id,targetId:u.id})):[] };
+  }
+  useAgileManoeuvre(id: AgileManoeuvre, unitId: string, trigger: 'MOVE'|'SETUP'|'CHARGE'|'FIGHT'|'ENEMY_FALL_BACK'|'AFTER_ENEMY_SHOT', moveType?: 'NORMAL_MOVE'|'ADVANCE_MOVE'|'FALL_BACK_MOVE', rng?: RandomSource, reroll = false) {
+    return this.flowCommand(s => useAgileManoeuvre(s,id,unitId,trigger,moveType,rng,reroll));
+  }
+  activateEuphoricStrikes(unitId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.phase!=='Fight'||s.flow?.window?.trigger!=='START_OF_PHASE'||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!onBattlefield(unit))return failure('UNIT_NOT_ELIGIBLE');
+      const bearer=unit.models.find(m=>m.alive&&modelDefinition(s,unit,m).abilities.some(a=>a.id==='EUPHORIC_STRIKES'));
+      if(!bearer)return failure('UNIT_NOT_ELIGIBLE');
+      if(s.flow.effects.some(e=>e.source==='EUPHORIC_STRIKES'&&e.target.modelId===bearer.id))return failure('USAGE_LIMIT');
+      for(const [characteristic,value] of [['ATTACKS',3],['AP',-1]] as const)
+        applyEffect(s,{source:'EUPHORIC_STRIKES',target:{unitId,modelId:bearer.id},payload:{kind:'MODIFIER',characteristic,value},expiry:'END_OF_CURRENT_PHASE',stacking:'STACK'});
+      return {ok:true,value:undefined};
+    });
+  }
+  useTerrifyingCrescendo(unitId:string,targetId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.flow?.window?.trigger!=='AFTER_UNIT_SHOT'||s.flow.window.unitId!==unitId||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!sourceAbilities(s,unit).some(entry=>entry.ability.id==='TERRIFYING_CRESCENDO'&&
+        unit.models.some(m=>m.alive&&(m.componentUnitId??unit.id)===entry.sourceUnitId)))return failure('UNIT_NOT_ELIGIBLE');
+      if(!postShotHitTargets(s,unit).some(target=>target.id===targetId))return failure('INVALID_TARGET');
+      const source=`TERRIFYING_CRESCENDO:${unitId}:${s.turn}`;
+      if(s.flow.effects.some(effect=>effect.source===source))return failure('USAGE_LIMIT');
+      applyEffect(s,{source,target:{unitId:targetId},payload:{kind:'MODIFIER',characteristic:'LEADERSHIP',value:1},
+        expiry:'START_OF_NEXT_SHOOTING_PHASE',expiryPlayerId:unit.playerId,stacking:'REPLACE_SAME_SOURCE'});
+      return {ok:true,value:undefined};
+    });
+  }
+  useDoomSiren(unitId:string,targetId:string,rng:RandomSource):CommandResult<{rolls:number[];mortalWounds:number}> {
+    return this.flowCommand(s=>{
+      if(s.flow?.window?.trigger!=='AFTER_UNIT_SHOT'||s.flow.window.unitId!==unitId||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId);
+      if(!unit||unit.playerId!==s.activePlayerId||!sourceAbilities(s,unit).some(entry=>entry.ability.id==='DOOM_SIREN'&&
+        unit.models.some(m=>m.alive&&(m.componentUnitId??unit.id)===entry.sourceUnitId)))return failure('UNIT_NOT_ELIGIBLE');
+      const target=postShotHitTargets(s,unit,'INFANTRY').find(enemy=>enemy.id===targetId);
+      if(!target)return failure('INVALID_TARGET');
+      const lastStart=s.events.reduce((latest,e,index)=>e.type==='shooting-started'&&e.unitId===unitId&&e.turn===s.turn?index:latest,-1);
+      if(s.events.slice(lastStart+1).some(e=>e.type==='flow'&&e.name==='DOOM_SIREN_RESOLVED'&&e.unitId===unitId))return failure('USAGE_LIMIT');
+      const rolls=rollD6s(3,rng),wounds=rolls.filter(die=>die>=4).length;
+      const result=resolveMortalWounds(s,target,wounds,rng);
+      flowEvent(s,'DOOM_SIREN_RESOLVED',{targetUnitId:target.id,rolls,mortalWounds:result.applied,modelsDestroyed:result.destroyedModelIds},unitId,unit.playerId);
+      if(result.applied>0&&target.models.some(m=>m.alive)){
+        const shock=resolveBattleShockRoll(s,target,rng);target.state.battleShocked=!shock.success;
+        flowEvent(s,'BATTLE_SHOCK_ROLL_RESOLVED',{rolls:shock.rolls,total:shock.total,success:shock.success,source:'DOOM_SIREN'},target.id,target.playerId);
+        if(!shock.success) openWindow(s,'AFTER_BATTLE_SHOCK_FAILED',{unitId:target.id,targetUnitId:target.id});
+      }
+      return {ok:true,value:{rolls,mortalWounds:result.applied}};
+    });
+  }
+  /** Guide targets a visible enemy at the end of the Aeldari player's Movement phase. */
+  useGuide(unitId:string,targetId:string):CommandResult {
+    return this.flowCommand(s=>{
+      if(s.phase!=='Movement'||s.flow?.window?.trigger!=='END_OF_PHASE'||s.flow.window.passedPlayerIds.includes(s.activePlayerId))return failure('WRONG_TIMING');
+      const unit=s.units.find(u=>u.id===unitId),target=s.units.find(u=>u.id===targetId);
+      if(!unit||!target||unit.playerId!==s.activePlayerId||target.playerId===unit.playerId||!onBattlefield(unit)||!onBattlefield(target))return failure('INVALID_TARGET');
+      const seers=unit.models.filter(m=>m.alive&&modelDefinition(s,unit,m).abilities.some(a=>a.id==='GUIDE'));
+      if(!seers.length)return failure('UNIT_NOT_ELIGIBLE');
+      if(s.flow.effects.some(e=>e.source===`GUIDE:${unit.playerId}`&&e.target.unitId===targetId&&e.createdAt.turn===s.turn))return failure('USAGE_LIMIT');
+      const provider=this.policies.visibilityProvider?.(s)??createVisibilityProvider(s,this.policies.detectionRange??getDetectionRange,this.policies.visibility);
+      if(!seers.some(m=>target.models.some(n=>n.alive&&edgeDistance(m,n)<=18+EPSILON)&&provider.isUnitVisible(m,target)))return failure('INVALID_TARGET');
+      applyEffect(s,{source:`GUIDE:${unit.playerId}`,target:{unitId:targetId},payload:{kind:'FLAG',flag:'GUIDED',value:true},
+        expiry:'START_OF_NEXT_COMMAND_PHASE',expiryPlayerId:unit.playerId,stacking:'REPLACE_SAME_SOURCE'});
+      return {ok:true,value:undefined};
+    });
+  }
+  moveReactionModel(modelId:string,target:Position,path?:MovementPath): CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionMove;
+      if(!tx) return failure('NO_ACTIVE_MOVEMENT');
+      const u=s.units.find(u=>u.id===tx.unitId)!,m=u.models.find(m=>m.id===modelId);
+      if(!m) return failure('MODEL_NOT_IN_UNIT');
+      if(!m.alive || !isFinitePosition(target)) return failure('INVALID_POSITION');
+      const distance=validateTerrainPath(s,m,target,path);if(!distance.ok) return distance;
+      const used=(tx.used[modelId]??0)+distance.value.totalMovementDistance;
+      if(used>tx.allowance+EPSILON) return {...failure('EXCEEDS_ALLOWANCE'),distance:used,remaining:tx.allowance-(tx.used[modelId]??0)};
+      const legal=validateFinalPosition(s,u,m,target);if(!legal.ok) return legal;
+      const from={...m.position};m.position={...target};tx.used[modelId]=used;
+      flowEvent(s,'REACTION_MODEL_MOVED',{modelId,fromX:from.x,fromY:from.y,toX:target.x,toY:target.y},u.id,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
+  completeReactionMove(): CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionMove;if(!tx)return failure('NO_ACTIVE_MOVEMENT');
+      const u=s.units.find(x=>x.id===tx.unitId)!;
+      const coherency=checkCoherency(u.models,s.spatialRules.coherency);
+      if(!coherency.coherent) return {...failure('INCOHERENT'),modelIds:coherency.failingModelIds};
+      s.reactionMove=null;
+      flowEvent(s,'REACTION_MOVE_COMPLETED',{source:tx.source,allowance:tx.allowance},u.id,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
+  /** Optional 11e Rangers reaction, sharing the spatial reaction transaction. */
+  usePathOfTheOutcast(unitId:string,rng:RandomSource):CommandResult {
+    return this.flowCommand(s=>{
+      const u=s.units.find(x=>x.id===unitId),moved=s.units.find(x=>x.id===s.flow?.window?.unitId);
+      const stamp=`PATH_OF_THE_OUTCAST:${s.flow?.window?.id}:${unitId}`;
+      if(!u || !moved || !s.flow || s.flow.window?.trigger!=='AFTER_ENEMY_MOVE' || s.flow.resolvedAbilities.includes(stamp) || s.phase!=='Movement' ||
+        u.playerId===s.activePlayerId || moved.playerId!==s.activePlayerId || !u.models.some(m=>m.alive) ||
+        !sourceAbilities(s,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST') ||
+        unitDistance(u,moved)>8+EPSILON || engagedTargets(s,u).length || s.reactionMove || !rng) return failure('UNIT_NOT_ELIGIBLE');
+      const roll=rollD6(rng);
+      s.reactionMove={unitId,source:'PATH_OF_THE_OUTCAST',allowance:roll,
+        originals:u.models.map(m=>({modelId:m.id,position:{...m.position}})),used:{}};
+      s.flow.resolvedAbilities.push(stamp);
+      flowEvent(s,'REACTION_MOVE_STARTED',{source:'PATH_OF_THE_OUTCAST',roll,allowance:roll},unitId,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
 
   /** Legacy Task 001 helpers. New UI commands use tryNextPhase/tryNextTurn results. */
   nextPhase(): GameState {
@@ -88,6 +229,7 @@ export class GameEngine {
       const draft = this.getState(), before = this.getState();
       const result = new MatchFlowController(draft, this.policies.flow, this.policies.reserves).advance();
       if (!result.ok) return result;
+      if (before.phase==='Fight' && (draft.phase!=='Fight'||draft.turn!==before.turn)) this.resolveDaemonicPatrons(draft,before);
       if (draft.round > before.round) resolveReserveExpiration(draft, before.round, this.policies.reserves);
       if (draft.status === 'finished') resolveReserveExpiration(draft, draft.round, this.policies.reserves, true);
       if (draft.phase === 'Charge' || draft.turn > before.turn) for (const u of draft.units) delete u.moveLock;
@@ -104,6 +246,7 @@ export class GameEngine {
     if (this.state.phase === 'Fight' && !this.state.closeCombat?.fight && this.state.units.some(u => onBattlefield(u) && (u.state.hasCharged || isUnitEngaged(this.state, u)))) return failure('WRONG_FIGHT_STEP');
     const before = this.getState();
     const next = transition(this.getState());
+    if (before.phase==='Fight' && (next.phase!=='Fight'||next.turn!==before.turn)) this.resolveDaemonicPatrons(next,before);
     if (next.round > before.round) resolveReserveExpiration(next, before.round, this.policies.reserves);
     if (next.phase === 'Charge' || next.turn > before.turn) for (const u of next.units) delete u.moveLock;
     this.commit(next);
@@ -122,10 +265,13 @@ export class GameEngine {
     const result = validateBeginMovement(this.state, unitId, moveType);
     if (!result.ok) return result;
     if (!validateMovementAbilities(this.state, result.value, abilityChoices)) return failure('INVALID_ABILITY_CHOICE');
+    if (abilityChoices.rerollAdvance && (moveType !== 'ADVANCE_MOVE' || effectiveFlag(this.state,unitId,'FIXED_ADVANCE_SIX'))) return failure('INVALID_ABILITY_CHOICE');
     if (moveType !== 'NORMAL_MOVE') {
       const draft = this.getState(), unit = draft.units.find(u => u.id === unitId)!;
-      if (!rng && (moveType === 'ADVANCE_MOVE' || !fallBackOptions(draft, unit).orderedRetreat)) return failure('INVALID_CONFIGURATION');
-      const bonus = moveType === 'ADVANCE_MOVE' ? rollD6(rng!) : 0;
+      const fixedAdvance=moveType==='ADVANCE_MOVE' && effectiveFlag(draft,unitId,'FIXED_ADVANCE_SIX');
+      if (!rng && (moveType === 'ADVANCE_MOVE' && !fixedAdvance || !fallBackOptions(draft, unit).orderedRetreat && moveType==='FALL_BACK_MOVE')) return failure('INVALID_CONFIGURATION');
+      const advanceRoll = moveType === 'ADVANCE_MOVE' && !fixedAdvance && abilityChoices.rerollAdvance ? rollStrategistDie(rng!,true) : undefined;
+      const bonus = moveType === 'ADVANCE_MOVE' ? fixedAdvance ? 6 : advanceRoll?.value ?? rollD6(rng!) : 0;
       const desperate = moveType === 'FALL_BACK_MOVE' && !fallBackOptions(draft, unit).orderedRetreat;
       if (desperate) {
         const hazard = resolveHazardRolls(draft, unit, unit.models.filter(m => m.alive).length, rng!);
@@ -138,7 +284,7 @@ export class GameEngine {
         }
       }
       draft.movement = { unitId, abilityChoices: copy(abilityChoices), moveType, bonus, desperate, irreversible: moveType === 'ADVANCE_MOVE' || desperate, originals: unit.models.map(m => ({ modelId: m.id, position: { ...m.position }, movementUsed: m.movementUsed })) };
-      if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus }, unitId); }
+      if (bonus) { unit.advanceBonus = { turn: draft.turn, value: bonus }; flowEvent(draft, 'ADVANCE_ROLLED', { bonus, ...(advanceRoll ? {initial:advanceRoll.initial,rerolled:advanceRoll.wasRerolled,source:'SUPERLATIVE_STRATEGIST'} : {}) }, unitId); }
       this.commit(draft); this.event(unitId, { type: 'movement-started' }); return { ok: true, value: undefined };
     }
     this.state.movement = { unitId, abilityChoices: copy(abilityChoices), originals: result.value.models.map(m => ({
@@ -208,6 +354,12 @@ export class GameEngine {
     if (draft.movement!.abilityChoices?.mobile) { const roll = rollD6(rng!); if (roll === 1) moved.state.battleShocked = true; flowEvent(draft, 'SUPER_HEAVY_WALKER_TEST', { roll }, moved.id); }
     draft.movement = null;
     draft.events.push({ type: 'movement-completed', unitId: unit.id, playerId: unit.playerId, turn: draft.turn, round: draft.round, sequence: draft.events.length + 1 });
+    if (draft.flow && draft.units.some(u=>u.playerId!==moved.playerId &&
+      sourceAbilities(draft,u).some(x=>x.ability.id==='PATH_OF_THE_OUTCAST') &&
+      u.models.some(m=>m.alive) && unitDistance(u,moved)<=8+EPSILON && !engagedTargets(draft,u).length))
+      openWindow(draft,'AFTER_ENEMY_MOVE',{unitId:moved.id});
+    if (moveType === 'FALL_BACK_MOVE' && draft.flow && draft.units.some(u => u.playerId !== moved.playerId && (hasFactionRule(draft,u,'BATTLE_FOCUS') &&
+        draft.factionHistory?.engagedAtPhaseStart?.[u.id]?.includes(moved.id) || draft.stratagemDefinitions?.some(d=>d.id==='CUT_DOWN_THE_WEAK') && unitKeywords(draft,u).includes('EMPERORS_CHILDREN')))) openWindow(draft,'AFTER_ENEMY_FALL_BACK',{unitId:moved.id});
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
     this.commit(draft);
     return { ok: true, value: undefined };
@@ -220,7 +372,8 @@ export class GameEngine {
     const weapons = availableRangedWeapons(this.state, unitId);
     const shooter = validateShooter(this.state, unitId); if (!shooter.ok) return shooter;
     if (!weapons.ok && !(weapons.reason === 'NO_RANGED_WEAPONS' && capacityDefinition(this.state, shooter.value)?.firingDeck)) return weapons;
-    const draft = this.getState(); draft.shooting = { unitId, firedWeaponIds: [], hasRolled: false };
+    const draft = this.getState(); draft.shooting = { unitId, firedWeaponIds: [], hasRolled: false,
+      psychicCommunionBonus: psychicCommunionBonus(draft,shooter.value) };
     if (capacityDefinition(draft, shooter.value)?.firingDeck) { const selected = selectFiringDeck(draft, unitId, deck); if (!selected.ok) return selected; }
     else if (deck.length) return failure('FIRING_DECK_LIMIT');
     this.commit(draft);
@@ -242,7 +395,10 @@ export class GameEngine {
     const weapon = definitionFor(this.state, unit).weapons.find(w => w.id === weaponId) ?? this.state.shooting?.firingDeck?.find(x => x.borrowed.id === weaponId)?.borrowed;
     if (!weapon) return failure('WEAPON_NOT_FOUND');
     const draft = copy(choices);
-    if (!validAttackChoices(weapon, draft)) return failure('INVALID_ABILITY_CHOICE');
+    const meleeTarget=this.state.closeCombat?.fight?.selected?.selectedTarget?.targetUnitId;
+    const attackProfile=factionAttackWeapon(this.state,unit,weapon,meleeTarget?this.state.units.find(u=>u.id===meleeTarget):undefined);
+    if (!validAttackChoices(attackProfile, draft)) return failure('INVALID_ABILITY_CHOICE');
+    if (draft.ignoredAccuracyModifiers && !unit.models.some(m=>m.alive && modelDefinition(this.state,unit,m).abilities.some(a=>a.id==='INESCAPABLE_ACCURACY'))) return failure('INVALID_ABILITY_CHOICE');
     if (draft.shootingMode === 'INDIRECT' && !hasWeaponAbility(weapon, 'INDIRECT_FIRE')) return failure('INVALID_ABILITY_CHOICE');
     try { resolvedAbilities(this.state, unit, weapon, draft); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     if (this.state.shooting && draft.shootingMode) {
@@ -256,14 +412,50 @@ export class GameEngine {
   private rollWindow(state: GameState): RollWindow {
     return (trigger, job) => {
       state.units = state.units.map(u => u.id === job.target.id ? job.target : u);
-      flowEvent(state, trigger, { weaponId: job.weapon.id, modelId: job.current!.modelId, roll: (trigger === 'AFTER_HIT_ROLL' ? job.current!.hit : job.current!.wound)!.value }, job.attackerUnitId);
+      flowEvent(state, trigger, { weaponId: job.weapon.id, modelId: job.current!.modelId, roll: trigger === 'AFTER_HIT_ROLL' ? job.current!.hit!.value : trigger === 'AFTER_WOUND_ROLL' ? job.current!.wound!.value : job.current!.damage!.value }, job.attackerUnitId);
       if (!state.flow) return false;
       const probe = copy(state);
       openWindow(probe, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
-      if (!probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
+      const bearer = state.units.find(u => u.id === job.attackerUnitId);
+      const aspectEligible = !!bearer?.resourceCounters?.ASPECT_SHRINE &&
+        !!bearer.models.find(m => m.id === job.current?.modelId && m.alive && !modelKeywords(state, bearer, m).includes('CHARACTER'));
+      if (!(branchingFatesSource(state,job) || trigger!=='AFTER_DAMAGE_ROLL' && aspectEligible) && !probe.players.some(p => new StratagemEngine(probe, this.policies.stratagems).options(p.id).some(o => o.result.ok))) return false;
       openWindow(state, trigger, { unitId: job.attackerUnitId, targetUnitId: job.target.id });
       return true;
     };
+  }
+  /** 11e Aspect Shrine substitutes one paused, unmodified Hit or Wound die with a natural six. */
+  spendAspectShrineToken(): CommandResult {
+    return this.flowCommand(s => {
+      const job = s.attackJob, window = s.flow?.window;
+      if (!job || !window || !['AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL'].includes(window.trigger) || window.unitId !== job.attackerUnitId) return failure('WRONG_TIMING');
+      const u = s.units.find(u => u.id === job.attackerUnitId), model = u?.models.find(m => m.id === job.current?.modelId);
+      if (!u || !model || !model.alive || modelKeywords(s, u, model).includes('CHARACTER') || !u.resourceCounters?.ASPECT_SHRINE) return failure('UNIT_NOT_ELIGIBLE');
+      const hit = window.trigger === 'AFTER_HIT_ROLL', die = hit ? job.current?.hit : job.current?.wound;
+      if (!die) return failure('INVALID_CONFIGURATION');
+      if (job.current!.modifiers.some(m => m.source === `ASPECT_SHRINE:${window.trigger}`)) return failure('USAGE_LIMIT');
+      die.value = 6;
+      job.current!.modifiers.push({ source: `ASPECT_SHRINE:${window.trigger}`, target: 'DIE', amount: 6, timing: window.trigger });
+      if (hit) job.resolution.hitRolls[job.resolution.hitRolls.length - 1] = 6;
+      else job.resolution.woundRolls[job.resolution.woundRolls.length - 1] = 6;
+      u.resourceCounters.ASPECT_SHRINE--;
+      return { ok: true, value: undefined };
+    });
+  }
+  useBranchingFates():CommandResult {
+    return this.flowCommand(s=>{
+      const job=s.attackJob,w=s.flow?.window;
+      if(!job||!w||!['AFTER_HIT_ROLL','AFTER_WOUND_ROLL','AFTER_DAMAGE_ROLL'].includes(w.trigger)||w.unitId!==job.attackerUnitId)return failure('WRONG_TIMING');
+      const source=branchingFatesSource(s,job);if(!source)return failure('UNIT_NOT_ELIGIBLE');
+      const current=job.current!;
+      if(w.trigger==='AFTER_HIT_ROLL'){current.hit!.value=6;job.resolution.hitRolls[job.resolution.hitRolls.length-1]=6;}
+      else if(w.trigger==='AFTER_WOUND_ROLL'){current.wound!.value=6;job.resolution.woundRolls[job.resolution.woundRolls.length-1]=6;}
+      else {current.damage!.value=6;current.damage!.rolls=[6];}
+      current.modifiers.push({source:'BRANCHING_FATES',target:'DIE',amount:6,timing:w.trigger});
+      s.flow!.resolvedAbilities.push(branchingFatesStamp(s,source));
+      flowEvent(s,'BRANCHING_FATES_USED',{roll:w.trigger,modelId:current.modelId},job.attackerUnitId);
+      return {ok:true,value:undefined};
+    });
   }
   resumeAttack(rng: RandomSource): CommandResult<WeaponResolution> {
     const block = temporalBlock(this.state); if (block) return block;
@@ -303,7 +495,9 @@ export class GameEngine {
       for (const m of resolution.attackModifiers ?? []) for (const modifier of m.modifiers.filter(x => x.source !== 'TEMPORARY_EFFECT')) this.event(attackerUnitId, { type: modifier.source === 'COVER' ? 'cover-applied' : 'plunging-fire-applied', modelId: m.modelId, targetUnitId: job.target.id, effectiveSkill: m.effectiveSkill });
       for (const damage of resolution.damageResults) this.event(attackerUnitId, { type: 'model-damaged', targetUnitId: job.target.id, weaponId: weapon.id, damage });
       for (const modelId of resolution.destroyedModelIds) this.event(attackerUnitId, { type: 'model-destroyed', targetUnitId: job.target.id, weaponId: weapon.id, modelId });
-    } else this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution });
+      applyShootingOnHitEffects(this.state,job);
+    } else { if(this.state.closeCombat?.fight?.selected) delete this.state.closeCombat.fight.selected.selectedTarget;
+      this.event(attackerUnitId, { type: 'melee-attack-resolved', resolution }); }
     queueDestructions(before, this.state, attackerUnitId);
     processAttachmentCasualties(this.state, attackerUnitId);
     detectDestroyedTransports(this.state); normalizeDestroyed(this.state); recordTerrainChanges(before, this.state);
@@ -317,7 +511,12 @@ export class GameEngine {
       const legal = validateShootingTarget(s, s.shooting.unitId, weaponId, targetUnitId, this.visibility());
       if (!legal.ok) return legal;
       const target = s.units.find(u => u.id === targetUnitId)!;
+      const shooter = s.units.find(u=>u.id===s.shooting!.unitId)!;
+      const selectedWeapon = validateRangedWeapon(s,shooter.id,weaponId);
+      if (!selectedWeapon.ok) return selectedWeapon;
+      if (!validAttackChoices(factionAttackWeapon(s,shooter,selectedWeapon.value,target),s.shooting.attackChoices?.[weaponId] ?? {})) return failure('INVALID_ABILITY_CHOICE');
       s.shooting.selectedTarget = { weaponId, targetUnitId, modelCount: target.models.filter(m => m.alive).length, distances: Object.fromEntries(s.units.find(u => u.id === s.shooting!.unitId)!.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => [m.id, Math.min(...target.models.filter(m => m.alive).map(t => edgeDistance(m, t)))])) };
+      recordFactionTarget(s,'attackedByPhase',s.shooting.unitId,[targetUnitId]);
       openWindow(s, 'AFTER_TARGET_SELECTED', { unitId: s.shooting.unitId, targetUnitId });
       return { ok: true, value: undefined };
     });
@@ -338,11 +537,13 @@ export class GameEngine {
     const target = this.state.units.find(u => u.id === targetUnitId)!;
     if (precisionModelId && !this.precisionTargets(transaction.unitId, weaponId, targetUnitId).includes(precisionModelId)) return failure('PRECISION_TARGET_INVALID');
     const choices = { ...transaction.attackChoices?.[weaponId], ...(hasWeaponAbility(weapon.value, 'INDIRECT_FIRE') ? { shootingMode: transaction.shootingMode ?? 'NORMAL' as const } : {}) };
+    const attackWeapon = factionAttackWeapon(this.state, this.state.units.find(u=>u.id===transaction.unitId)!, weapon.value, target);
+    if (!validAttackChoices(attackWeapon,choices)) return failure('INVALID_ABILITY_CHOICE');
     try { resolvedAbilities(this.state, target, weapon.value, choices); } catch { return failure('ABILITY_CHOICE_REQUIRED'); }
     const before = this.getState(), draft = this.getState();
     const shooter = draft.units.find(u => u.id === transaction.unitId)!;
     const modifiers = shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id)).map(m => shootingModifiers(draft, m, target, weapon.value.skill, provider, weapon.value, choices));
-    const job = createAttackJob(weapon.value, legal.value.eligibleFiringModelIds, copy(target), definitionFor(draft, target), rng, modifiers, draft, precisionModelId, choices, provider);
+    const job = createAttackJob(attackWeapon, legal.value.eligibleFiringModelIds, copy(target), definitionFor(draft, target), rng, modifiers, draft, precisionModelId, choices, provider);
     // Reserve selection before the first irreversible roll; One Shot is per original bearer/weapon.
     for (const model of shooter.models.filter(m => legal.value.eligibleFiringModelIds.includes(m.id))) {
       if (job.contexts.find(c => c.attackerModelId === model.id)!.abilities.some(a => a.type === 'ONE_SHOT')) { model.oneShotExpended ??= []; model.oneShotExpended.push(weaponInstanceId(draft, shooter, model, weapon.value)); }
@@ -391,6 +592,7 @@ export class GameEngine {
     finishAttacker(draft, unitId); releaseDestructions(draft, unitId);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(before, draft);
+    this.openVengeanceWindow(draft,unitId,'shooting-started','weapon-fired');
     openWindow(draft, 'AFTER_UNIT_SHOT', { unitId }); this.commit(draft);
     return { ok: true, value: undefined };
   }
@@ -398,7 +600,7 @@ export class GameEngine {
   private combatCommand<T>(command: (controller: CloseCombatController) => CommandResult<T>): CommandResult<T> {
     if (this.state.attackJob) return failure('ATTACK_PENDING');
     const draft = this.getState();
-    const block = temporalBlock(draft); if (block) return block;
+    const block = temporalBlock(draft); if (block && !(block.reason==='PHASE_BLOCKED' && draft.closeCombat?.reaction && draft.closeCombat.charge)) return block;
     const result = command(new CloseCombatController(draft));
     if (result.ok) {
       queueDestructions(this.state, draft, draft.closeCombat?.fight?.selected?.unitId);
@@ -406,6 +608,10 @@ export class GameEngine {
         if (event.type === 'combat-move-completed' && event.kind === 'charge') openWindow(draft, 'AFTER_CHARGE_MOVE', { unitId: event.unitId });
         if (event.type === 'fight-unit-completed') { finishAttacker(draft, event.unitId); }
         if (event.type === 'melee-attack-resolved') processAttachmentCasualties(draft, event.unitId);
+        if (event.type === 'flow' && event.name === 'FIGHT_ON_DEATH_RESOLVED') {
+          const attackerId = event.detail.attackerUnitId as string;
+          if (!draft.fightOnDeath?.some(p => p.attackerUnitId === attackerId && p.defenderUnitId === event.unitId)) finishAttacker(draft, attackerId);
+        }
         if (event.type === 'fight-unit-completed') openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: event.unitId });
       }
       detectDestroyedTransports(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft); this.commit(draft); }
@@ -417,7 +623,14 @@ export class GameEngine {
   getLegalChargeTargets() {
     const charge = this.state.closeCombat?.charge;
     if (!charge || this.state.closeCombat?.move) return [];
-    return copy(getLegalChargeTargets(this.state, this.state.units.find(u => u.id === charge.unitId)!, charge.distance));
+    const source=this.state.units.find(u=>u.id===charge.unitId)!,reaction=this.state.closeCombat?.reaction;
+    const raw=charge.rolls.reduce((sum,roll)=>sum+roll,0);
+    const candidates=getLegalChargeTargets(this.state, source, raw);
+    if(reaction?.targetUnitId && !candidates.some(u=>u.id===reaction.targetUnitId)) return [];
+    return copy(candidates.filter(u=>
+      (!reaction?.targetUnitId || reaction.targetUnitId===u.id || !!findChargeFormation(this.state,source,[reaction.targetUnitId,u.id],chargeAllowance(this.state,raw,[reaction.targetUnitId,u.id],source.id))) &&
+      (reaction?.mode!=='LEAP_TO_DEFEND' || u.state.hasCharged) &&
+      (reaction?.mode!=='INTO_THE_FRAY' || unitDistance(source,u)<=6+EPSILON)));
   }
   selectChargeTargets(ids: string[]) { return this.combatCommand(c => c.selectChargeTargets(ids)); }
   failCharge() { return this.combatCommand(c => c.failCharge()); }
@@ -428,9 +641,92 @@ export class GameEngine {
   startFightPhase() { return this.combatCommand(c => c.startFightPhase()); }
   advanceFightStep() { return this.combatCommand(c => c.advanceFightStep()); }
   beginPileIn(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginPileIn(id, targets)); }
-  beginConsolidation(id: string, targets: string[] = []) { return this.combatCommand(c => c.beginConsolidation(id, targets)); }
+  beginConsolidation(id: string, targets: string[] = []):CommandResult {
+    const fight=this.state.closeCombat?.fight;
+    if(this.state.flow && this.state.stratagemDefinitions?.some(d=>d.id==='INCESSANT_VIOLENCE') && fight?.step==='CONSOLIDATE' &&
+      !fight.consolidationWindowsOffered?.includes(id) && new CloseCombatController(this.getState()).consolidateUnits().some(u=>u.id===id)) {
+      return this.flowCommand(s=>{const f=s.closeCombat!.fight!; (f.consolidationWindowsOffered ??=[]).push(id);openWindow(s,'BEFORE_CONSOLIDATE',{unitId:id});return {ok:true,value:undefined};});
+    }
+    return this.combatCommand(c => c.beginConsolidation(id, targets));
+  }
   skipTacticalMove(id: string) { return this.combatCommand(c => c.skipTacticalMove(id)); }
   selectFightUnit(id: string) { return this.combatCommand(c => c.selectFightUnit(id)); }
+  /** A locked target; each ranged profile is resolved with the ordinary attack pipeline. */
+  getReactionShootingOptions(): CommandResult<{ weaponId:string; legal:boolean; reason?:string }[]> {
+    if (!this.state.reactionShooting) return failure('NO_ACTIVE_SHOOTING');
+    const view=reactionShootingView(this.state),tx=this.state.reactionShooting;
+    const unit=view.units.find(u=>u.id===tx.unitId)!;
+    return {ok:true,value:rangedLoadout(view,unit).map(w=>{
+      if(tx.firedWeaponIds.includes(w.id))return {weaponId:w.id,legal:false,reason:'WEAPON_ALREADY_FIRED'};
+      const result=validateShootingTarget(view,tx.unitId,w.id,tx.targetUnitId,createVisibilityProvider(view));
+      return {weaponId:w.id,legal:result.ok,reason:result.ok?undefined:result.reason};
+    })};
+  }
+  fireReactionWeapon(weaponId:string,rng:RandomSource,choices:AttackChoices={}):CommandResult<WeaponResolution> {
+    return this.flowCommand(s=>resolveReactionWeapon(s,weaponId,rng,choices));
+  }
+  completeReactionShooting(rng?:RandomSource):CommandResult {
+    return this.flowCommand(s=>{
+      const tx=s.reactionShooting;if(!tx)return failure('NO_ACTIVE_SHOOTING');
+      if(tx.hazardousCount&&!rng)return failure('INVALID_CONFIGURATION');
+      if(tx.hazardousCount){
+        const before=copy(s),unit=s.units.find(u=>u.id===tx.unitId)!;
+        const hazard=resolveHazardRolls(s,unit,tx.hazardousCount,rng!);
+        flowEvent(s,'HAZARD_ROLLED',{rolls:hazard.rolls,mortalWounds:hazard.mortalWounds},tx.unitId,unit.playerId);
+        queueDestructions(before,s,tx.unitId);detectDestroyedTransports(s);resolveDestructions(s,rng!);
+        processAttachmentCasualties(s);normalizeDestroyed(s);
+      }
+      s.reactionShooting=null;
+      flowEvent(s,'REACTION_SHOOTING_COMPLETED',{source:tx.source,targetUnitId:tx.targetUnitId,weapons:tx.firedWeaponIds},tx.unitId);
+      return {ok:true,value:undefined};
+    });
+  }
+  private openVengeanceWindow(s:GameState,attackerId:string,startType:'shooting-started'|'fight-unit-selected',attackType:'weapon-fired'|'melee-attack-resolved') {
+    if(!s.flow || !s.stratagemDefinitions?.some(d=>d.id==='VAULS_VENGEANCE'))return;
+    const from=[...s.events].reverse().find(e=>e.type===startType&&e.unitId===attackerId)?.sequence??0;
+    const targets=[...new Set(s.events.filter(e=>e.sequence>from&&e.unitId===attackerId&&e.type===attackType)
+      .map(e=>e.type==='weapon-fired'||e.type==='melee-attack-resolved'?e.resolution.targetUnitId:''))];
+    for(const targetId of targets){
+      const target=s.units.find(u=>u.id===targetId),attacker=s.units.find(u=>u.id===attackerId);
+      if(target&&attacker&&target.playerId!==attacker.playerId&&!target.models.some(m=>m.alive)&&
+        s.definitions.find(d=>d.id===target.definitionId)?.keywords.some(k=>['DIRE_AVENGERS','GUARDIANS'].includes(k.toUpperCase())))
+        openWindow(s,'AFTER_ENEMY_DESTROYED',{unitId:attackerId,targetUnitId:targetId});
+    }
+  }
+  activateDaemonicPatrons(unitId:string):CommandResult {
+    return this.flowCommand(s=>{
+      const selected=s.closeCombat?.fight?.selected,u=s.units.find(u=>u.id===unitId),phaseIndex=s.flow?.phaseIndex??s.turn*5+4;
+      if(s.phase!=='Fight'||!selected||selected.unitId!==unitId||selected.hasRolled||!u?.models.some(m=>m.alive)||
+        !sourceAbilities(s,u).some(x=>x.ability.id==='DAEMONIC_PATRONS')||s.daemonPatrons?.some(x=>x.unitId===unitId&&x.phaseIndex===phaseIndex))return failure('UNIT_NOT_ELIGIBLE');
+      (s.daemonPatrons??=[]).push({unitId,phaseIndex,fromSequence:s.events.length});
+      applyEffect(s,{source:'DAEMONIC_PATRONS',target:{unitId},payload:{kind:'FLAG',flag:'DAEMONIC_CRITICAL_WOUND',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'NON_STACKING'});
+      flowEvent(s,'DAEMONIC_PATRONS_INVOKED',{},unitId,u.playerId);
+      return {ok:true,value:undefined};
+    });
+  }
+  private resolveDaemonicPatrons(draft:GameState,before:GameState) {
+    const pending=draft.daemonPatrons??[];
+    for(const pact of pending.filter(p=>p.phaseIndex===(before.flow?.phaseIndex??before.turn*5+4))){
+      const u=draft.units.find(x=>x.id===pact.unitId);
+      const killed=before.events.some(e=>e.sequence>pact.fromSequence&&e.type==='melee-attack-resolved'&&e.unitId===pact.unitId&&e.resolution.destroyedModelIds.length>0);
+      const victim=!killed&&u?.models.find(m=>m.alive);
+      if(victim){victim.alive=false;victim.woundsRemaining=0;flowEvent(draft,'DAEMONIC_PATRONS_RECKONING',{modelId:victim.id},pact.unitId,u!.playerId);}
+    }
+    draft.daemonPatrons=pending.filter(p=>p.phaseIndex!==(before.flow?.phaseIndex??before.turn*5+4));
+    queueDestructions(before,draft);processAttachmentCasualties(draft);normalizeDestroyed(draft);
+  }
+  selectMeleeTarget(weaponId:string,targetUnitId:string) {
+    return this.flowCommand(s=>{
+      const blocker=temporalBlock(s); if(blocker) return blocker;
+      const result=new CloseCombatController(s).selectMeleeTarget(weaponId,targetUnitId);
+      if(result.ok) openWindow(s,'AFTER_TARGET_SELECTED',{unitId:s.closeCombat!.fight!.selected!.unitId,targetUnitId});
+      return result;
+    });
+  }
+  chooseExquisiteSwordsmanship(choice: 'LETHAL_HITS' | 'SUSTAINED_HITS') { return this.combatCommand(c => c.chooseExquisiteSwordsmanship(choice)); }
+  resolveFightOnDeath(defenderUnitId:string,weaponId:string,rng:RandomSource) {
+    return this.combatCommand(c=>c.resolveFightOnDeath(defenderUnitId,weaponId,rng,this.policies.damageAllocation));
+  }
   beginOverrun(targets: string[]) { return this.combatCommand(c => c.beginOverrun(targets)); }
   meleeAttack(weaponId: string, targetId: string, rng: RandomSource, precisionModelId?: string) {
     const id = this.state.closeCombat?.fight?.selected?.unitId;
@@ -450,6 +746,7 @@ export class GameEngine {
     queueDestructions(this.state, draft, id); finishAttacker(draft, id); releaseDestructions(draft, id);
     detectDestroyedTransports(draft); if (rng) resolveDestructions(draft, rng);
     processAttachmentCasualties(draft); normalizeDestroyed(draft); recordTerrainChanges(this.state, draft);
+    this.openVengeanceWindow(draft,id,'fight-unit-selected','melee-attack-resolved');
     openWindow(draft, 'AFTER_UNIT_FOUGHT', { unitId: id }); this.commit(draft); return result;
   }
 
@@ -548,6 +845,15 @@ export class GameEngine {
     if (result.ok) { queueDestructions(this.state, draft, draft.attackJob?.attackerUnitId); if (draft.attackJob) draft.attackJob.target = copy(draft.units.find(u => u.id === draft.attackJob!.target.id)!); recordDestroyedUnits(this.state, draft); interruptActionsOnCommit(this.state, draft); synchronizeMission(draft, this.policies.reserves); validateState(draft); this.state = draft; }
     return copy(result);
   }
+  /** Optional between-action window for Stratagems whose timing is any point in a phase. */
+  openPhaseStratagemWindow(): CommandResult {
+    return this.flowCommand(s=>{
+      if (s.flow?.window || s.flow?.boundary!=='NONE' || s.flow?.pending.length || actionBusy(s)) return failure('PHASE_BLOCKED');
+      if (!['Movement','Shooting','Fight','Command'].includes(s.phase)) return failure('WRONG_PHASE');
+      openWindow(s,'DURING_PHASE');
+      return {ok:true,value:undefined};
+    });
+  }
   /** Explicit migration: legacy snapshots keep their original phase progression until enabled. */
   enableMatchFlow(rules: Partial<FlowRules> = {}): CommandResult {
     const draft = this.getState(), result = enableFlow(draft, rules);
@@ -598,7 +904,7 @@ export class GameEngine {
   resolveCommandAbility(id: string) { return this.flowCommand(s => new CommandController(s, this.policies.flow).resolve(id)); }
   passTimingWindow(playerId: string) { return this.flowCommand(s => passWindow(s, playerId)); }
   getStratagemOptions(playerId: string) { return copy(new StratagemEngine(this.getState(), this.policies.stratagems).options(playerId)); }
-  useStratagem(id: string, playerId: string, targets: string[]) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets)); }
+  useStratagem(id: string, playerId: string, targets: string[], rng?: RandomSource, mode?: string, pathOfCommand=false) { return this.flowCommand(s => new StratagemEngine(s, this.policies.stratagems).use(id, playerId, targets, rng, mode,pathOfCommand)); }
   gainCommandPoints(playerId: string, amount: number, policy: { ignoreLimit?: boolean; limit?: number } = {}) { return this.flowCommand(s => gainCommandPoints(s, playerId, amount, 'OTHER_CP_GAIN', policy)); }
   canSpendCommandPoints(playerId: string, amount: number) { return canSpendCommandPoints(this.state, playerId, amount); }
   spendCommandPoints(playerId: string, amount: number) { return this.flowCommand(s => spendCommandPoints(s, playerId, amount)); }

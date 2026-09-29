@@ -24,6 +24,15 @@ export function validateState(state: GameState): void {
   if (state.players.some(p => p.forceDisposition !== undefined && !['TAKE_AND_HOLD','PURGE_THE_FOE','DISRUPTION','RECONNAISSANCE','PRIORITY_ASSETS'].includes(p.forceDisposition))) throw new Error('Invalid Force Disposition');
   if (state.players.length !== 2 || new Set(state.players.map(p => p.id)).size !== 2 ||
       state.players.some(p => !p.id || !p.factionId) || !state.players.some(p => p.id === state.activePlayerId)) throw new Error('Invalid players');
+  if (state.enhancements && Object.entries(state.enhancements).some(([id,enhancement])=>!enhancement || !historicalUnit(state,id) ||
+    !state.definitions.find(d=>d.id===historicalUnit(state,id)?.definitionId)?.keywords.some(k=>k.toUpperCase()==='CHARACTER'))) throw new Error('Invalid enhancement assignment');
+  if (state.battleFocus && (!['INCURSION','STRIKE_FORCE','ONSLAUGHT'].includes(state.battleFocus.battleSize) ||
+      !Number.isSafeInteger(state.battleFocus.round) || state.battleFocus.round < 0 || state.battleFocus.round > state.round ||
+      Object.values(state.battleFocus.tokens).some(n => !Number.isSafeInteger(n) || n < 0) ||
+      Object.values(state.battleFocus.usedByPhase).some(ids => new Set(ids).size !== ids.length))) throw new Error('Invalid Battle Focus state');
+  if (state.fightOnDeath?.some(p=>state.phase!=='Fight' || !p.modelIds.length || new Set(p.modelIds).size!==p.modelIds.length ||
+    !state.units.some(u=>u.id===p.defenderUnitId && p.modelIds.every(id=>u.models.some(m=>m.id===id && !m.alive && m.woundsRemaining===0))) ||
+    !state.units.some(u=>u.id===p.attackerUnitId && u.playerId!==state.units.find(x=>x.id===p.defenderUnitId)?.playerId))) throw new Error('Invalid fight on death snapshot');
   if (state.round !== Math.floor((state.turn - 1) / 2) + 1 || state.activePlayerId !== state.players[((state.turn - 1) + (state.deployment?.stage === 'BATTLE_STARTED' ? state.players.findIndex(p => p.id === state.deployment!.firstTurnPlayerId) : 0)) % 2]!.id) throw new Error('Inconsistent turn');
   if (!Number.isFinite(state.battlefield.width) || state.battlefield.width <= 0 ||
       !Number.isFinite(state.battlefield.height) || state.battlefield.height <= 0) throw new Error('Invalid battlefield');
@@ -38,6 +47,10 @@ export function validateState(state: GameState): void {
     if (!d.id || !d.factionId || !Number.isSafeInteger(d.modelCount) || d.modelCount < 1 ||
         !Number.isSafeInteger(d.stats.leadership) || d.stats.leadership < 1 || !Number.isSafeInteger(d.stats.objectiveControl) || d.stats.objectiveControl < 0 || !Number.isSafeInteger(d.stats.wounds) || d.stats.wounds < 1 || !nonNegative(d.stats.movement) ||
         d.defaultBase.kind !== 'circle' || !Number.isFinite(d.defaultBase.diameterMm) || d.defaultBase.diameterMm <= 0) throw new Error('Invalid definition');
+    if (d.modelProfiles && (d.modelProfiles.reduce((count, p) => count + p.count, 0) !== d.modelCount ||
+        d.modelProfiles.some(p => !Number.isSafeInteger(p.count) || p.count < 1 ||
+          p.weaponIds.some(id => !d.weapons.some(w => w.id === id)) ||
+          (p.stats?.wounds !== undefined && (!Number.isSafeInteger(p.stats.wounds) || p.stats.wounds < 1))))) throw new Error('Invalid mixed model profiles');
   }
   for (const definition of state.definitions) {
     if (!Number.isSafeInteger(definition.stats.toughness) || definition.stats.toughness < 1 ||
@@ -51,12 +64,14 @@ export function validateState(state: GameState): void {
   const references = state.armies.flatMap(a => a.unitIds);
   if (references.length !== state.units.length || new Set(references).size !== references.length || references.some(id => !state.units.some(u => u.id === id))) throw new Error('Invalid unit references');
   for (const unit of state.units) {
+    if (unit.resourceCounters && Object.values(unit.resourceCounters).some(value => !Number.isSafeInteger(value) || value < 0)) throw new Error('Invalid unit resources');
     const d = definitionFor(state, unit);
     const army = state.armies.find(a => a.unitIds.includes(unit.id));
     if (!army || army.playerId !== unit.playerId || army.factionId !== d.factionId || unit.models.length !== d.modelCount) throw new Error('Invalid unit ownership or model count');
     for (const model of unit.models) {
       const md = modelDefinition(state, unit, model);
-      if (model.unitId !== unit.id || !Number.isInteger(model.woundsRemaining) || model.woundsRemaining < 0 || model.woundsRemaining > md.stats.wounds ||
+      if (model.unitId !== unit.id || !Number.isInteger(model.woundsRemaining) || model.woundsRemaining < 0 || model.woundsRemaining > (model.stats?.wounds ?? md.stats.wounds) ||
+          (model.weaponIds?.some(id => !md.weapons.some(w => w.id === id)) ?? false) ||
           (model.toughness !== undefined && (!Number.isSafeInteger(model.toughness) || model.toughness < 1)) || model.alive !== (model.woundsRemaining > 0) || !isFinitePosition(model.position) ||
           model.base.kind !== 'circle' || !Number.isFinite(model.base.diameterMm) || model.base.diameterMm <= 0 ||
           !nonNegative(model.movementUsed) || (!state.flow && model.movementUsed > md.stats.movement + (unit.advanceBonus?.turn === state.turn ? unit.advanceBonus.value : 0) + EPSILON) ||
@@ -81,7 +96,23 @@ export function validateState(state: GameState): void {
     const restored = living.map(m => ({ ...m, position: originals.find(o => o.modelId === m.id)?.position ?? m.position }));
     if (restored.some((a, i) => restored.slice(i + 1).some(b => modelsOverlap(a, b)))) throw new Error('Overlapping movement originals');
   }
+  if(state.reactionMove) {
+    const tx=state.reactionMove,u=state.units.find(u=>u.id===tx.unitId);
+    if(!u || !onBattlefield(u) || u.playerId===state.activePlayerId || !['OPPORTUNITY_SEIZED','FADE_BACK','PATH_OF_THE_OUTCAST'].includes(tx.source) ||
+      (tx.source==='FADE_BACK' ? state.phase!=='Shooting' : state.phase!=='Movement') ||
+      !Number.isInteger(tx.allowance) || tx.allowance<(tx.source==='PATH_OF_THE_OUTCAST'?1:2) || tx.allowance>(tx.source==='PATH_OF_THE_OUTCAST'?6:7) ||
+      tx.originals.length!==u.models.length || tx.originals.some(o=>!u.models.some(m=>m.id===o.modelId) || !isFinitePosition(o.position)) ||
+      Object.entries(tx.used).some(([id,d])=>!u.models.some(m=>m.id===id)||!nonNegative(d)||d>tx.allowance+EPSILON)) throw new Error('Invalid reaction movement transaction');
+  }
   if (state.events.some((event, i) => event.sequence !== i + 1 || (event.type !== 'flow' && !historicalUnit(state, event.unitId)))) throw new Error('Invalid event sequence');
+  if (state.daemonPatrons?.some(p=>!state.units.some(u=>u.id===p.unitId)||!Number.isSafeInteger(p.phaseIndex)||p.phaseIndex<0||!Number.isSafeInteger(p.fromSequence)||p.fromSequence<0||p.fromSequence>state.events.length)) throw new Error('Invalid patron pact');
+  if (state.reactionShooting){
+    const tx=state.reactionShooting,shooter=state.units.find(u=>u.id===tx.unitId),target=state.units.find(u=>u.id===tx.targetUnitId);
+    if(!state.flow || !['Shooting','Fight'].includes(state.phase)||tx.source!=='VAULS_VENGEANCE'||!shooter||!target||shooter.playerId===target.playerId||!shooter.models.some(m=>m.alive)||
+      !state.definitions.find(d=>d.id===shooter.definitionId)?.keywords.includes('WAR_WALKERS') ||
+      (tx.hazardousCount!==undefined&&(!Number.isSafeInteger(tx.hazardousCount)||tx.hazardousCount<0)) ||
+      new Set(tx.firedWeaponIds).size!==tx.firedWeaponIds.length || tx.firedWeaponIds.some(id=>!state.definitions.find(d=>d.id===shooter.definitionId)?.weapons.some(w=>w.kind==='ranged'&&w.id===id))) throw Error('Invalid reaction Shooting transaction');
+  }
   validateMissionState(state);
   validateAttackState(state);
   validateTransportState(state);

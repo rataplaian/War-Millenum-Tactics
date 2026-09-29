@@ -52,7 +52,10 @@ export class TransportController {
     if (!onBattlefield(t) || !t.models.some(m => m.alive) || s.phase !== 'Movement' || u.playerId !== s.activePlayerId) return failure('WRONG_PHASE');
     if (!u.embarked!.preBattle && u.embarked!.embarkedAtTurn === s.turn && u.embarked!.embarkedAtPhase === s.phase) return failure('DISEMBARK_NOT_ALLOWED');
     const move = t.lastMove?.turn === s.turn && t.lastMove.phase === s.phase ? t.lastMove.kind : null;
-    if (move === 'ADVANCE_MOVE' || move === 'FALL_BACK_MOVE' || t.state.hasAdvanced || t.state.hasFallenBack) return failure('DISEMBARK_NOT_ALLOWED');
+    const rules = capacityDefinition(s, t)!;
+    if (move === 'FALL_BACK_MOVE' || t.state.hasFallenBack) return failure('DISEMBARK_NOT_ALLOWED');
+    if (move === 'ADVANCE_MOVE' || t.state.hasAdvanced) return rules.afterAdvance === 'SHOCK' ? { ok: true, value: { mode: 'SHOCK', formation: null } } : failure('DISEMBARK_NOT_ALLOWED');
+    if (move === 'NORMAL_MOVE' && rules.afterNormalMove === 'ASSAULT') return { ok: true, value: { mode: 'ASSAULT', formation: null } };
     if (move === 'NORMAL_MOVE' || move === 'INGRESS_MOVE' || t.arrival?.turn === s.turn || t.state.hasMoved) return { ok: true, value: { mode: 'RAPID', formation: null } };
     if (candidate) { const valid = validateDisembarkFormation(s, u, t.models.find(m => m.alive)!, candidate, 3, {}); if (!valid.ok) return valid; return { ok: true, value: { mode: 'TACTICAL', formation: candidate } }; }
     const search = searchDisembark(s, u, t.models.find(m => m.alive)!, 3, {});
@@ -98,7 +101,7 @@ export class TransportController {
     const s = this.s, ts = transportState(s), tx = ts.disembark!;
     u.location = u.models.some(m => m.alive) ? 'BATTLEFIELD' : 'DESTROYED'; delete u.embarked; u.setupAtTurn = s.turn; delete u.moveLock;
     u.lastMove = { kind: 'DISEMBARK_MOVE', turn: s.turn, phase: s.phase };
-    if (tx.mode !== 'TACTICAL') u.cannotChargeUntilTurn = s.turn;
+    if (!['TACTICAL', 'ASSAULT', 'SHOCK'].includes(tx.mode)) u.cannotChargeUntilTurn = s.turn;
     if (tx.mode === 'COMBAT' || tx.mode === 'EMERGENCY') { u.state.battleShocked = true; flowEvent(s, 'BATTLE_SHOCK_APPLIED', { source: tx.mode }, u.id, u.playerId); }
     if (tx.mode === 'TACTICAL' && u.models.some(m => m.alive)) ts.tacticalFollowUp = u.id;
     if (tx.mode === 'COMBAT') flowEvent(s, 'COMBAT_DISEMBARK', {}, u.id, u.playerId);

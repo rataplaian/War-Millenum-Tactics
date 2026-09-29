@@ -31,6 +31,8 @@ export function formAttachments(s: GameState, assignments: readonly AttachmentAs
       stats: { ...definitions[0]!.stats, wounds: Math.max(...definitions.map(d => d.stats.wounds)) },
       keywords: [...new Set(definitions.flatMap(d => [...d.keywords]))], abilities: [], coreAbilities: [],
       weapons: units.flatMap((u, i) => definitions[i]!.weapons.map(w => ({ ...copy(w), id: `${u.id}:${w.id}` }))) };
+    // Mixed profiles belong to each original datasheet; the attached unit has heterogeneous components.
+    delete (d as { modelProfiles?: UnitDefinition['modelProfiles'] }).modelProfiles;
     const runtime: Unit = { ...copy(units[0]!), id: a.id, definitionId: d.id, startedBattleAttached: true,
       models: units.flatMap(u => u.models.map(m => ({ ...copy(m), unitId: a.id, componentUnitId: u.id, sourceDefinitionId: u.definitionId }))) };
     s.attachments ??= []; s.attachments.push({ id: a.id, active: true, components: units.map((u, i) => ({ role: i === 0 ? 'BODYGUARD' : a.leaderIds?.includes(u.id) ? 'LEADER' : 'SUPPORT', original: copy(u) })), destroyedComponentIds: [], retainedSources: [], pendingSplitBy: [] });
@@ -44,6 +46,7 @@ function split(s: GameState, a: AttachmentRecord, u: Unit) {
   const survivors: Unit[] = a.components.map(c => {
     const models = u.models.filter(m => m.componentUnitId === c.original.id).map(m => ({ ...copy(m), unitId: c.original.id }));
     return { ...copy(c.original), ...copy(u), id: c.original.id, definitionId: c.original.definitionId, models, startedBattleAttached: true,
+      resourceCounters: c.role === 'BODYGUARD' ? copy(u.resourceCounters ?? {}) : copy(c.original.resourceCounters ?? {}),
       location: models.some(m => m.alive) ? u.location : 'DESTROYED' };
   });
   for (const unit of survivors) if (unit.location === 'DESTROYED') { delete unit.embarked; delete unit.moveLock; }
@@ -68,19 +71,22 @@ export function processAttachmentCasualties(s: GameState, attackerId?: string) {
     const u = s.units.find(u => u.id === a.id)!;
     for (const c of a.components) if (!u.models.some(m => m.componentUnitId === c.original.id && m.alive) && !a.destroyedComponentIds.includes(c.original.id)) {
       a.destroyedComponentIds.push(c.original.id);
-      if (attackerId) a.retainedSources.push({ componentId: c.original.id, attackerId });
+      if (attackerId && attackerId !== a.id) a.retainedSources.push({ componentId: c.original.id, attackerId });
       flowEvent(s, 'ATTACHED_COMPONENT_DESTROYED', { componentId: c.original.id, keywords: [...s.definitions.find(d => d.id === c.original.definitionId)!.keywords] }, u.id, u.playerId);
     }
     const bodyAlive = a.components.some(c => c.role === 'BODYGUARD' && !a.destroyedComponentIds.includes(c.original.id));
     const attachedAlive = a.components.some(c => c.role !== 'BODYGUARD' && !a.destroyedComponentIds.includes(c.original.id));
     if (!bodyAlive || !attachedAlive) {
-      if (attackerId) { if (!a.pendingSplitBy.includes(attackerId)) a.pendingSplitBy.push(attackerId); }
+      if (attackerId && attackerId !== a.id) { if (!a.pendingSplitBy.includes(attackerId)) a.pendingSplitBy.push(attackerId); }
       else if (!a.pendingSplitBy.length) split(s, a, u);
     }
   }
 }
 export function finishAttacker(s: GameState, attackerId: string) {
   for (const a of s.attachments?.filter(a => a.active) ?? []) {
+    // Keep the aggregate and its source weapon IDs intact until every slain model
+    // has resolved Fight on Death against this attacker's completed activation.
+    if (s.fightOnDeath?.some(p => p.defenderUnitId === a.id && p.attackerUnitId === attackerId)) continue;
     a.retainedSources = a.retainedSources.filter(x => x.attackerId !== attackerId);
     const pending = a.pendingSplitBy.includes(attackerId); a.pendingSplitBy = a.pendingSplitBy.filter(id => id !== attackerId);
     if (pending && !a.pendingSplitBy.length) split(s, a, s.units.find(u => u.id === a.id)!);

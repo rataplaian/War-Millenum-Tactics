@@ -6,6 +6,7 @@ import { gainCommandPoints } from '../resources/CommandPoints';
 import { getUnitsRequiringBattleShockRoll, resolveBattleShockRoll } from './BattleShock';
 import { failure } from '../rules/movement';
 import type { RandomSource } from '../utils/dice';
+import { secureFactionObjectives } from '../content/stickyObjectives';
 export class CommandController {
   constructor(private s: GameState, private policies: FlowPolicies = {}) {}
   private addAbilities(step: CommandStep | 'MISSION_HOOK') {
@@ -16,9 +17,9 @@ export class CommandController {
   enter(step: CommandStep) {
     const s = this.s, f = s.flow!; f.commandStep = step;
     flowEvent(s, 'COMMAND_STEP_STARTED', { step });
-    if (step === 'START_OF_COMMAND_PHASE') { f.resolvedAbilities = []; openWindow(s, 'AT_START_OF_COMMAND_PHASE'); }
+    if (step === 'START_OF_COMMAND_PHASE') { f.resolvedAbilities = []; f.battleShockResolvedPhase = { phaseIndex: f.phaseIndex, unitIds: [] }; openWindow(s, 'AT_START_OF_COMMAND_PHASE'); }
     if (step === 'GAIN_CORE_CP') for (const p of s.players) { const result = gainCommandPoints(s, p.id, 1, 'CORE_CP'); if (!result.ok) throw new Error('Core CP overflow'); }
-    if (step === 'BATTLE_SHOCK') f.pending.push(...getUnitsRequiringBattleShockRoll(s).map(u => ({ id: `shock:${s.turn}:${u.id}`, kind: 'BATTLE_SHOCK' as const, unitId: u.id, label: `Battle-shock: ${u.id}` })));
+    if (step === 'BATTLE_SHOCK') f.pending.push(...getUnitsRequiringBattleShockRoll(s).filter(u => !f.battleShockResolvedPhase?.unitIds.includes(u.id)).map(u => ({ id: `shock:${s.turn}:${u.id}`, kind: 'BATTLE_SHOCK' as const, unitId: u.id, label: `Battle-shock: ${u.id}` })));
     if (step === 'END_OF_COMMAND_PHASE') { f.missionHookStarted = false; openWindow(s, 'AT_END_OF_COMMAND_PHASE'); }
     this.addAbilities(step);
   }
@@ -32,6 +33,7 @@ export class CommandController {
       f.missionHookStarted = true; this.addAbilities('MISSION_HOOK');
       if (f.pending.length) return { ok: true, value: undefined };
     }
+    if (f.commandStep === 'END_OF_COMMAND_PHASE') secureFactionObjectives(s);
     flowEvent(s, 'COMMAND_STEP_COMPLETED', { step: f.commandStep });
     const next = COMMAND_STEPS[COMMAND_STEPS.indexOf(f.commandStep) + 1];
     if (next) this.enter(next);
@@ -43,13 +45,14 @@ export class CommandController {
     if (!f || f.commandStep !== 'BATTLE_SHOCK') return failure('WRONG_COMMAND_STEP');
     if (f.window) return failure('TIMING_WINDOW_OPEN');
     const pending = f.pending.find(p => p.kind === 'BATTLE_SHOCK' && p.unitId === unitId), unit = s.units.find(u => u.id === unitId);
-    if (!pending || !unit) return failure('UNIT_NOT_ELIGIBLE');
+    if (!pending || !unit || f.battleShockResolvedPhase?.unitIds.includes(unitId)) return failure('UNIT_NOT_ELIGIBLE');
     const result = resolveBattleShockRoll(s, unit, rng);
     flowEvent(s, 'BATTLE_SHOCK_ROLL_STARTED', {}, unitId);
     flowEvent(s, 'BATTLE_SHOCK_ROLL_RESOLVED', result, unitId);
     unit.state.battleShocked = !result.success;
     flowEvent(s, result.success ? 'BATTLE_SHOCK_CLEARED' : 'BATTLE_SHOCK_APPLIED', {}, unitId);
     f.pending = f.pending.filter(p => p.id !== pending.id);
+    (f.battleShockResolvedPhase ??= { phaseIndex: f.phaseIndex, unitIds: [] }).unitIds.push(unitId);
     if (!result.success) openWindow(s, 'AFTER_BATTLE_SHOCK_FAILED', { unitId, targetUnitId: unitId });
     return { ok: true, value: result };
   }

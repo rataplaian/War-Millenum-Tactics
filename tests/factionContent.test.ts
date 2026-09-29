@@ -1,0 +1,800 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { GameEngine } from '../src/game/engine/GameEngine';
+import { createUnit } from '../src/game/engine/createUnit';
+import { AELDARI_DATASHEETS, EMPERORS_CHILDREN_DATASHEETS } from '../src/game/content/factionDatasheets';
+import { AELDARI_PRESET, EMPERORS_CHILDREN_PRESET, createAeldariVsEmperorsChildrenMatch } from '../src/game/content/presets';
+import { VERIFIED_MUSTER_ENTRIES } from '../src/game/content/verifiedEntries';
+import { createAttackJob, runAttackJob } from '../src/game/combat/AttackPipeline';
+import { createTestMatch } from '../src/game/data/prototype';
+import { factionAttackWeapon } from '../src/game/content/attackAbilities';
+import { expireEffects } from '../src/game/effects/EffectEngine';
+import { effectiveCharacteristic } from '../src/game/effects/EffectEngine';
+import { chargeAllowance } from '../src/game/rules/closeCombat';
+import { createFactionContentRegistry, FACTION_CONTENT } from '../src/game/content/registry';
+import { validatePresetRoster } from '../src/game/content/validatePresetRoster';
+import { shootingModifiers } from '../src/game/terrain/attackModifiers';
+import { createVisibilityProvider } from '../src/game/terrain/visibility';
+import { serpentShieldSave } from '../src/game/content/defensiveAbilities';
+import { secureFactionObjectives } from '../src/game/content/stickyObjectives';
+import { CommandController } from '../src/game/command/CommandController';
+import { psychicCommunionBonus } from '../src/game/content/psychicCommunion';
+import { validAttackChoices } from '../src/game/abilities/validation';
+import { abilitiesFor, allHave, scoutDistance } from '../src/game/deployment/abilities';
+import { postShotHitTargets } from '../src/game/content/postShooting';
+import { resolveBattleShockRoll } from '../src/game/command/BattleShock';
+import { createCloseCombatTestMatch } from '../src/game/data/closeCombatPrototype';
+import { effectiveFlag } from '../src/game/effects/EffectEngine';
+import { canUseSuperlativeStrategist, rollStrategistDie } from '../src/game/content/strategist';
+import { branchingFatesSource } from '../src/game/content/branchingFates';
+
+test('Superlative Strategist rerolls one movement die for a living attached Autarch',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(9),unit=s.units.find(u=>u.id==='avenger-command')!;
+  assert.equal(canUseSuperlativeStrategist(s,unit),true);
+  let i=0;const die=rollStrategistDie(()=>[0,.99][i++]!,true);
+  assert.deepEqual([die.initial,die.value,die.wasRerolled,die.rerollSource],[1,6,true,'SUPERLATIVE_STRATEGIST']);
+  assert.equal(i,2);
+  const noReroll=rollStrategistDie(()=>0,false);
+  assert.equal(noReroll.wasRerolled,false);
+  const leader=unit.models.find(m=>m.sourceDefinitionId==='autarch')!;
+  leader.alive=false;
+  assert.equal(canUseSuperlativeStrategist(s,unit),false);
+});
+test('Branching Fates pauses a leading Farseer attack at Hit, Wound and Damage without consuming later dice',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(17),u=s.units.find(u=>u.id==='storm-council')!,target=s.units.find(u=>u.id==='noise-command')!;
+  u.location='BATTLEFIELD';target.location='BATTLEFIELD';
+  u.models.forEach((m,i)=>m.position={x:4+i*1.2,y:5});
+  target.models.forEach((m,i)=>m.position={x:25+i*1.5,y:5});
+  const farseer=u.models.find(m=>m.sourceDefinitionId==='farseer')!,profile=s.definitions.find(d=>d.id==='farseer')!;
+  farseer.position={x:16,y:5};
+  const weapon={...profile.weapons.find(w=>w.id==='eldritch-storm')!,id:'farseer:eldritch-storm'};
+  let count=0;const rng=()=>{count++;return .4;};
+  const job=createAttackJob(weapon,[farseer.id],target,s.definitions.find(d=>d.id===target.definitionId)!,rng,[],s);
+  assert.equal(branchingFatesSource(s,job),undefined);
+  const pause=(trigger:'AFTER_HIT_ROLL'|'AFTER_WOUND_ROLL'|'AFTER_DAMAGE_ROLL')=>trigger==='AFTER_DAMAGE_ROLL' && !!branchingFatesSource(s,job);
+  assert.equal(runAttackJob(job,rng,s,pause),false);
+  assert.equal(job.stage,'DAMAGE_RESULT');
+  const pausedCount=count,snapshot=JSON.parse(JSON.stringify(job));
+  assert.equal(snapshot.stage,job.stage);
+  assert.equal(branchingFatesSource(s,job),'farseer');
+  job.current!.damage!.value=6;
+  assert.equal(runAttackJob(job,rng,s),true);
+  assert.ok(count>=pausedCount);
+  assert.equal(job.resolution.attackRecords?.[0]?.damage?.value,6);
+});
+test('Branching Fates engine command replaces a paused die once per phase and survives snapshot',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(19),u=s.units.find(u=>u.id==='storm-council')!,target=s.units.find(u=>u.id==='noise-command')!;
+  delete s.deployment;s.phase='Shooting';s.flow!.phaseIndex=3;s.flow!.started=true;
+  u.location='BATTLEFIELD';target.location='BATTLEFIELD';
+  u.models.forEach((m,i)=>m.position={x:4+i*1.6,y:6});target.models.forEach((m,i)=>m.position={x:29+i*1.6,y:6});
+  const e=new GameEngine(s);
+  assert.equal(e.beginShooting(u.id).ok,true);
+  const available=e.getRangedWeapons(u.id);assert.equal(available.ok,true);
+  const weapon=(available.ok?available.value:[]).find(w=>w.id.includes('eldritch-storm'))!;
+  assert.ok(weapon);
+  assert.equal(e.selectShootingTarget(weapon.id,target.id).ok,true);
+  for(const p of e.getState().players)assert.equal(e.passTimingWindow(p.id).ok,true);
+  const result=e.fireWeapon(weapon.id,target.id,()=>.4);
+  assert.equal(result.ok,true);
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_HIT_ROLL');
+  assert.equal(e.useBranchingFates().ok,true);
+  assert.equal(e.useBranchingFates().ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+  assert.equal(e.getState().attackJob?.current?.hit?.value,6);
+  const damage=new GameEngine(s);
+  assert.equal(damage.beginShooting(u.id).ok,true);
+  assert.equal(damage.selectShootingTarget(weapon.id,target.id).ok,true);
+  const passOne=()=>{for(const p of damage.getState().players)assert.equal(damage.passTimingWindow(p.id).ok,true);};
+  passOne();assert.equal(damage.fireWeapon(weapon.id,target.id,()=>.4).ok,true);
+  passOne();assert.equal(damage.resumeAttack(()=>.4).ok,true);
+  assert.equal(damage.getState().flow?.window?.trigger,'AFTER_WOUND_ROLL');
+  passOne();assert.equal(damage.resumeAttack(()=>.4).ok,true);
+  assert.equal(damage.getState().flow?.window?.trigger,'AFTER_DAMAGE_ROLL');
+  assert.equal(damage.useBranchingFates().ok,true);
+  const saved=new GameEngine(damage.getState());
+  assert.equal(saved.getState().attackJob?.current?.damage?.value,6);
+  passOne();const finished=damage.resumeAttack(()=>.4);
+  assert.equal(finished.ok,true);
+  assert.equal(finished.ok?finished.value.damageResults[0]?.resolved.value:undefined,6);
+  const wound=new GameEngine(s);
+  assert.equal(wound.beginShooting(u.id).ok,true);
+  assert.equal(wound.selectShootingTarget(weapon.id,target.id).ok,true);
+  for(const p of wound.getState().players) assert.equal(wound.passTimingWindow(p.id).ok,true);
+  assert.equal(wound.fireWeapon(weapon.id,target.id,()=>.4).ok,true);
+  for(const p of wound.getState().players) assert.equal(wound.passTimingWindow(p.id).ok,true);
+  assert.equal(wound.resumeAttack(()=>.4).ok,true);
+  assert.equal(wound.getState().flow?.window?.trigger,'AFTER_WOUND_ROLL');
+  assert.equal(wound.useBranchingFates().ok,true);
+  assert.equal(wound.getState().attackJob?.current?.wound?.value,6);
+  const dead=s.units.find(x=>x.id===u.id)!.models.find(m=>m.sourceDefinitionId==='farseer')!;
+  dead.alive=false;dead.woundsRemaining=0;
+  assert.equal(branchingFatesSource(s,wound.getState().attackJob!),undefined);
+});
+test('Rangers react to a nearby completed enemy move using the shared reaction transaction',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const ranger=AELDARI_DATASHEETS.find(d=>d.id==='rangers')!,s=createTestMatch();
+  s.phase='Movement';s.turn=2;s.activePlayerId='player-2';s.definitions=[ranger,s.definitions[1]!];
+  s.players[0]!.factionId=ranger.factionId;s.armies[0]!.factionId=ranger.factionId;
+  s.units[0]=createUnit(ranger,'unit-1','player-1',Array.from({length:ranger.modelCount},(_,i)=>({x:5+i*1.5,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:16+i*1.5,y:6});
+  const e=engine(s);pass(e);
+  ok(e.beginMovement('unit-2'));ok(e.moveModel(e.getState().units[1]!.models[0]!.id,{x:14.5,y:6}));ok(e.completeMovement());
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_ENEMY_MOVE');
+  assert.equal(e.usePathOfTheOutcast('unit-2',()=>0).ok,false);
+  ok(e.usePathOfTheOutcast('unit-1',()=>.5));
+  assert.equal(e.getState().reactionMove?.allowance,4);
+  const before=e.getState();assert.equal(e.moveReactionModel(e.getState().units[0]!.models[0]!.id,{x:30,y:5}).ok,false);
+  assert.deepEqual(e.getState(),before);
+  ok(e.completeReactionMove());
+  assert.equal(e.usePathOfTheOutcast('unit-1',()=>0).ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Daemonic Patrons affects melee critical wounds and takes one model when no attacks destroy an enemy',async()=>{
+  const {engine,pass}=await import('./flow.helpers');
+  const s=createCloseCombatTestMatch(),blades=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='flawless-blades')!;
+  s.phase='Fight';s.players[0]!.factionId=blades.factionId;s.armies[0]!.factionId=blades.factionId;
+  s.definitions=[blades,s.definitions[1]!];
+  s.units[0]=createUnit(blades,'unit-1','player-1',[{x:4.5,y:8.5},{x:6.1,y:8.5},{x:7.7,y:8.5}]);
+  const e=engine(s);pass(e);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,false);
+  assert.equal(e.startFightPhase().ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  for(const u of e.getState().units) assert.equal(e.skipTacticalMove(u.id).ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  assert.equal(e.selectFightUnit('unit-1').ok,true);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,true);
+  assert.equal(e.activateDaemonicPatrons('unit-1').ok,false);
+  assert.equal(effectiveFlag(e.getState(),'unit-1','DAEMONIC_CRITICAL_WOUND'),true);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+  const snapshot=e.getState(),source=snapshot.units[0]!,target=snapshot.units[1]!,targetDef=snapshot.definitions[1]!;
+  const tougher={...targetDef,stats:{...targetDef.stats,toughness:12}};
+  snapshot.definitions=[snapshot.definitions[0]!,tougher];
+  const weapon=blades.weapons.find(w=>w.id==='blissblade')!;
+  const job=createAttackJob(weapon,[source.models[0]!.id],target,tougher,()=>.34,[],snapshot);
+  runAttackJob(job,()=>.34,snapshot);
+  assert.equal(job.resolution.attackRecords?.[0]?.wound?.value,3);
+  assert.equal(job.resolution.attackRecords?.[0]?.criticalWound,true);
+  assert.equal(e.completeFightUnit().ok,true);
+  pass(e);
+  assert.equal(e.selectFightUnit('unit-2').ok,true);
+  assert.equal(e.completeFightUnit().ok,true);
+  pass(e);
+  assert.equal(e.advanceFightStep().ok,true);
+  for(const u of e.getState().units.filter(u=>u.models.some(m=>m.alive))) assert.equal(e.skipTacticalMove(u.id).ok,true);
+  assert.equal(e.advanceFightStep().ok,true);
+  assert.equal(e.tryNextPhase().ok,true);
+  pass(e);
+  assert.equal(e.tryNextPhase().ok,true);
+  pass(e);
+  assert.equal(e.tryNextPhase().ok,true);
+  assert.equal(e.getState().units[0]!.models.filter(m=>m.alive).length,2);
+  assert.ok(e.getState().events.some(x=>x.type==='flow'&&x.name==='DAEMONIC_PATRONS_RECKONING'));
+});
+
+test('exactly nineteen sourced datasheets have selectable equipment and matching fixed prices', () => {
+  const catalog = [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS];
+  assert.equal(catalog.length,19);
+  assert.deepEqual(catalog.map(d=>d.id),VERIFIED_MUSTER_ENTRIES.map(e=>e.id));
+  for (const d of catalog) {
+    assert.equal(d.placeholder,false,d.id);
+    assert.equal(d.points,VERIFIED_MUSTER_ENTRIES.find(e=>e.id===d.id)!.points);
+    assert.ok(d.weapons.length>0,d.id);
+    assert.ok(d.abilities.length>0,d.id);
+    const u=createUnit(d,d.id,'player-1',Array.from({length:d.modelCount},(_,i)=>({x:i,y:1})));
+    assert.equal(u.models.length,d.modelCount);
+    assert.ok(u.models.every(m=>m.weaponIds===undefined || m.weaponIds.every(id=>d.weapons.some(w=>w.id===id))));
+  }
+});
+test('Farseer storm rolls D3 damage and both Witchblades critically wound Infantry on 2+', () => {
+  const farseer=AELDARI_DATASHEETS.find(d=>d.id==='farseer')!;
+  const warlock=AELDARI_DATASHEETS.find(d=>d.id==='warlock')!;
+  assert.deepEqual(farseer.weapons.find(w=>w.id==='eldritch-storm')?.damage,{kind:'dice',count:1,sides:3,modifier:0});
+  for(const d of [farseer,warlock]) assert.deepEqual(d.weapons.find(w=>w.id==='witchblade')?.weaponAbilities?.find(a=>a.type==='ANTI'),
+    {id:'witchblade:anti-infantry',type:'ANTI',keyword:'INFANTRY',threshold:2});
+  const s=createTestMatch();
+  const bearer=createUnit(farseer,'unit-1','player-1',[{x:4,y:4}]);
+  s.definitions=[farseer,s.definitions[1]!];s.units[0]=bearer;
+  const target=s.units[1]!, weapon=farseer.weapons.find(w=>w.id==='witchblade')!;
+  const job=createAttackJob(weapon,[bearer.models[0]!.id],target,s.definitions[1]!,()=>.17,[],s);
+  runAttackJob(job,()=>.17,s);
+  assert.equal(job.resolution.attackRecords?.[0]?.criticalWound,true);
+  assert.deepEqual(weapon,farseer.weapons.find(w=>w.id==='witchblade'));
+});
+test('Assured Destruction grants optional rerolls only versus Monster or Vehicle without mutating the datasheet', () => {
+  const s=createTestMatch(), dragon=AELDARI_DATASHEETS.find(d=>d.id==='fire-dragons')!;
+  s.definitions=[dragon,s.definitions[1]!];
+  const unit=createUnit(dragon,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:5})));
+  s.units[0]=unit;
+  const base=dragon.weapons.find(w=>w.id==='dragon-fusion-gun')!;
+  const infantry=factionAttackWeapon(s,unit,base,s.units[1]!);
+  assert.equal(infantry,base);
+  s.definitions=s.definitions.map((d,i)=>i===1?{...d,keywords:['VEHICLE']}:d);
+  const attack=factionAttackWeapon(s,unit,base,s.units[1]!);
+  assert.deepEqual(attack.rerollPermissions?.map(p=>p.kind),['HIT','WOUND','DAMAGE']);
+  assert.equal(base.rerollPermissions,undefined);
+  const target=s.units[1]!;
+  const rolls=[0,.8,.8,.8,.8,.8,.8];let index=0;
+  const job=createAttackJob(attack,[unit.models[0]!.id],target,s.definitions[1]!,()=>rolls[index++]??.8,[],s,undefined,{rerolls:{HIT:'FAILED'}});
+  runAttackJob(job,()=>rolls[index++]??.8,s);
+  assert.equal(job.resolution.attackRecords?.[0]?.hit?.wasRerolled,true);
+  assert.equal(job.resolution.attackRecords?.[0]?.hit?.rerollSource,'ASSURED_DESTRUCTION');
+});
+test('an invalid Assured Destruction target rejects the selected reroll before any attack or state change', async () => {
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const s=createTestMatch(),dragons=AELDARI_DATASHEETS.find(d=>d.id==='fire-dragons')!;
+  s.phase='Shooting';s.definitions=[dragons,s.definitions[1]!];
+  s.players[0]!.factionId=dragons.factionId;s.armies[0]!.factionId=dragons.factionId;
+  s.units[0]=createUnit(dragons,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:11});
+  const e=engine(s);pass(e);
+  ok(e.beginShooting('unit-1'));
+  ok(e.setAttackChoices('dragon-fusion-gun',{rerolls:{HIT:'FAILED'}}));
+  const before=e.getState();let called=false;
+  const rejected=e.selectShootingTarget('dragon-fusion-gun','unit-2');
+  assert.equal(rejected.ok,false);
+  assert.equal(called,false);
+  assert.deepEqual(e.getState(),before);
+  const target=before.definitions.find(d=>d.id===before.units[1]!.definitionId)!;
+  before.definitions=before.definitions.map(d=>d.id===target.id?{...d,keywords:['VEHICLE']}:d);
+  const eligible=new GameEngine(before);
+  pass(eligible);
+  ok(eligible.selectShootingTarget('dragon-fusion-gun','unit-2'));pass(eligible);
+  ok(eligible.fireWeapon('dragon-fusion-gun','unit-2',()=>{called=true;return .99;}));
+  assert.equal(called,true);
+});
+test('Rangers use their 5+ invulnerable save against ranged attacks only', () => {
+  const s=createTestMatch(),rangers=AELDARI_DATASHEETS.find(d=>d.id==='rangers')!;
+  s.definitions=[s.definitions[0]!,rangers];
+  const target=createUnit(rangers,'unit-2','player-2',Array.from({length:5},(_,i)=>({x:3+i*1.5,y:12})));
+  s.units[1]=target;
+  const base=s.definitions[0]!.weapons[0]!;
+  const ranged={...base,attacks:{kind:'fixed' as const,value:1},strength:10,armourPenetration:-3};
+  const shot=createAttackJob(ranged,[s.units[0]!.models[0]!.id],target,rangers,()=>.75,[],s);
+  runAttackJob(shot,()=>.75,s);
+  assert.equal(shot.resolution.saveResults[0]?.selected,'INVULNERABLE');
+  assert.equal(shot.resolution.saveResults[0]?.saved,true);
+  const sword={...ranged,kind:'melee' as const,range:null};
+  const strike=createAttackJob(sword,[s.units[0]!.models[0]!.id],target,rangers,()=>.75,[],s);
+  runAttackJob(strike,()=>.75,s);
+  assert.equal(strike.resolution.saveResults[0]?.selected,'ARMOUR');
+  assert.equal(strike.resolution.saveResults[0]?.saved,false);
+});
+test('Emperor’s Children chosen leader weapons preserve D3 damage and the default Lord loadout', () => {
+  const sorcerer=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='sorcerer')!;
+  for(const id of ['agonising-energies','force-weapon']) assert.deepEqual(sorcerer.weapons.find(w=>w.id===id)?.damage,
+    {kind:'dice',count:1,sides:3,modifier:0});
+  const exultant=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-exultant')!;
+  assert.deepEqual(exultant.weapons.map(w=>w.id),['bolt-pistol','plasma-pistol','phoenix-power-spear','lord-close-combat-weapon']);
+  assert.ok(exultant.keywords.includes('SLAANESH'));
+});
+test('Chaos Land Raider carries two separately targetable lascannons with matching profiles',()=>{
+  const d=EMPERORS_CHILDREN_DATASHEETS.find(x=>x.id==='chaos-land-raider')!;
+  const guns=d.weapons.filter(w=>w.id.startsWith('soulshatter-lascannon'));
+  assert.deepEqual(guns.map(w=>w.id),['soulshatter-lascannon','soulshatter-lascannon-2']);
+  assert.equal(guns[0]?.name,guns[1]?.name);
+  assert.deepEqual(guns[0]?.attacks,{kind:'fixed',value:2});
+  assert.deepEqual(guns[1]?.damage,{kind:'dice',count:1,sides:6,modifier:1});
+});
+test('attached leaders grant Perfectionists and Obsessive Annunciation only while leading', () => {
+  const s=createAeldariVsEmperorsChildrenMatch(4);
+  const target=s.units.find(u=>u.id==='storm-council')!,infractors=s.units.find(u=>u.id==='infractor-command')!,noise=s.units.find(u=>u.id==='noise-command')!;
+  for(const unit of [target,infractors,noise]) unit.location='BATTLEFIELD';
+  target.models.forEach((m,i)=>m.position={x:10+i,y:15});
+  infractors.models.forEach((m,i)=>m.position={x:10+i,y:13});
+  noise.models.forEach((m,i)=>m.position={x:10+i,y:9});
+  const weapon=(u:typeof infractors,id:string)=>s.definitions.find(d=>d.id===u.definitionId)!.weapons.find(w=>w.id===id)!;
+  const targetDefinition=s.definitions.find(d=>d.id===target.definitionId)!;
+  const melee=weapon(infractors,'infractors:duelling-sabre'),infantry=infractors.models.find(m=>m.sourceDefinitionId==='infractors')!;
+  const first=createAttackJob(melee,[infantry.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(first.contexts[0]!.abilities.some(a=>a.type==='LETHAL_HITS'&&a.source==='PERFECTIONISTS'),true);
+  runAttackJob(first,()=>.99,s);
+  assert.equal(first.resolution.attackRecords?.[0]?.automaticallyWoundedFromCriticalHit,true);
+  const sonic=weapon(noise,'noise-marines:sonic-blaster'),marine=noise.models.find(m=>m.sourceDefinitionId==='noise-marines')!;
+  const second=createAttackJob(sonic,[marine.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(second.contexts[0]!.abilities.some(a=>a.type==='SUSTAINED_HITS'&&a.source==='OBSESSIVE_ANNUNCIATION'),true);
+  runAttackJob(second,()=>.99,s);
+  assert.equal(second.resolution.attackRecords?.[0]?.generatedAdditionalHits,1);
+  const kakophonist=noise.models.find(m=>m.sourceDefinitionId==='lord-kakophonist')!;
+  kakophonist.alive=false;kakophonist.woundsRemaining=0;
+  const without=createAttackJob(sonic,[marine.id],target,targetDefinition,()=>.99,[],s);
+  assert.equal(without.contexts[0]!.abilities.some(a=>a.source==='OBSESSIVE_ANNUNCIATION'),false);
+});
+test('Guide selects a visible target only at Movement end and improves allied Aeldari Hit rolls until next Command', async () => {
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const s=createTestMatch(),farseer={...AELDARI_DATASHEETS.find(d=>d.id==='farseer')!,attachment:undefined};
+  s.phase='Movement';s.definitions=[farseer,s.definitions[1]!];
+  s.players[0]!.factionId=farseer.factionId;s.armies[0]!.factionId=farseer.factionId;
+  s.units[0]=createUnit(farseer,'unit-1','player-1',[{x:4,y:4}]);
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+  const e=engine(s);pass(e);
+  const before=e.getState();assert.equal(e.useGuide('unit-1','unit-2').ok,false);assert.deepEqual(e.getState(),before);
+  ok(e.tryNextPhase());
+  ok(e.useGuide('unit-1','unit-2'));
+  const guided=e.getState();
+  assert.equal(guided.flow?.effects.some(x=>x.source==='GUIDE:player-1'&&x.target.unitId==='unit-2'&&x.active),true);
+  assert.equal(e.useGuide('unit-1','unit-2').ok,false);
+  assert.deepEqual(new GameEngine(guided).getState(),guided);
+  const weapon=farseer.weapons.find(w=>w.id==='eldritch-storm')!,unit=guided.units[0]!,target=guided.units[1]!;
+  const job=createAttackJob(weapon,[unit.models[0]!.id],target,guided.definitions[1]!,()=>.01,[],guided);
+  runAttackJob(job,()=>.2,guided);
+  assert.equal(job.resolution.attackRecords?.[0]?.modifiers.some(m=>m.source==='GUIDE'),true);
+  assert.equal(job.resolution.attackRecords?.[0]?.hitSucceeded,true);
+  guided.turn=3;guided.activePlayerId='player-1';expireEffects(guided,'COMMAND_START');
+  assert.equal(guided.flow?.effects.find(x=>x.source==='GUIDE:player-1')?.active,false);
+});
+test('the live content registry resolves nineteen selected profiles and reports unfinished rules explicitly',()=>{
+  const registry=createFactionContentRegistry();
+  for(const definition of [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS]) {
+    assert.equal(registry.datasheet(definition.id)?.id,definition.id);
+    for(const weapon of definition.weapons) assert.equal(registry.weapon(definition.id,weapon.id)?.id,weapon.id);
+  }
+  assert.equal(registry.enhancement('BREATH_OF_VAUL')?.points,10);
+  assert.equal(registry.enhancement('FAULTLESS_OPPORTUNIST')?.points,15);
+  assert.equal(registry.stratagem('DEATH_ECSTASY')?.cpCost,2);
+  assert.equal(registry.ability('GUIDE')?.resolverId,'GameEngine.useGuide');
+  assert.equal(registry.preset(AELDARI_PRESET.id)?.id,AELDARI_PRESET.id);
+  const aeldari=validatePresetRoster(FACTION_CONTENT[0]!,AELDARI_PRESET);
+  assert.equal(aeldari.valid,true,aeldari.errors.join(', '));
+  const emperorsChildren=validatePresetRoster(FACTION_CONTENT[1]!,EMPERORS_CHILDREN_PRESET);
+  assert.equal(emperorsChildren.valid,true,emperorsChildren.errors.join(', '));
+});
+test('selected faction loadouts retain model counts, wargear and source keywords',()=>{
+  const expected: Record<string, [number, string][]> = {
+    'storm-guardians': [[6,'shuriken-pistol'],[2,'guardian-flamer'],[2,'guardian-fusion-gun'],[1,'close-combat-weapon']],
+    'dire-avengers': [[9,'avenger-shuriken-catapult'],[1,'avenger-shuriken-catapult']],
+    'fire-dragons': [[4,'dragon-fusion-gun'],[1,'exarch-dragon-fusion-gun']],
+    'dark-reapers': [[4,'reaper-launcher-starshot'],[1,'tempest-launcher']],
+    'infractors': [[9,'duelling-sabre'],[1,'infractor-power-sword']],
+    'tormentors': [[4,'boltgun'],[1,'bolt-pistol']],
+    'noise-marines': [[4,'sonic-blaster'],[2,'blastmaster-single']],
+  };
+  for (const d of [...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS]) {
+    assert.equal(d.placeholder,false,d.id);
+    assert.equal(d.modelProfiles?.reduce((n,p)=>n+p.count,0)??d.modelCount,d.modelCount,d.id);
+    for (const [count,weapon] of expected[d.id]??[]) assert.equal(d.modelProfiles?.filter(p=>p.count===count&&p.weaponIds.includes(weapon)).length,1,`${d.id}: ${weapon}`);
+    for (const p of d.modelProfiles??[]) for(const id of p.weaponIds) assert.ok(d.weapons.some(w=>w.id===id),`${d.id}: ${id}`);
+    if (d.factionId==='EMPERORS_CHILDREN') assert.ok(d.keywords.includes('SLAANESH'),d.id);
+  }
+  for (const id of ['infractors','tormentors','flawless-blades']) assert.ok(EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id===id)?.keywords.includes('GRENADES'));
+  const tormentors=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='tormentors')!;
+  assert.deepEqual(tormentors.weapons.find(w=>w.id==='bolt-pistol')?.weaponAbilities?.map(a=>a.type),['PISTOL','PRECISION']);
+  for (const id of ['wave-serpent','chaos-rhino']) assert.ok([...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)?.keywords.includes('DEDICATED_TRANSPORT'));
+});
+test('Warped Interference grants Cover while the Sorcerer leads, and stops when the leader dies',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(7);
+  const defender=s.units.find(u=>u.id==='tormentor-command')!,attacker=s.units.find(u=>u.id==='storm-council')!;
+  defender.location='BATTLEFIELD';attacker.location='BATTLEFIELD';
+  defender.models.forEach((m,i)=>m.position={x:7+i,y:10});
+  const model=attacker.models.find(m=>m.sourceDefinitionId==='farseer')!;model.position={x:7,y:5};
+  const weapon=s.definitions.find(d=>d.id===attacker.definitionId)!.weapons.find(w=>w.id==='farseer:eldritch-storm')!;
+  if(weapon.kind!=='ranged')assert.fail('expected ranged weapon');
+  const covered=shootingModifiers(s,model,defender,weapon.skill,createVisibilityProvider(s),weapon);
+  assert.equal(covered.modifiers.some(m=>m.source==='COVER'),true);
+  const sorcerer=defender.models.find(m=>m.sourceDefinitionId==='sorcerer')!;
+  sorcerer.alive=false;sorcerer.woundsRemaining=0;
+  const exposed=shootingModifiers(s,model,defender,weapon.skill,createVisibilityProvider(s),weapon);
+  assert.equal(exposed.modifiers.some(m=>m.source==='COVER'),false);
+});
+test('Doomweaver and Sorcerer witchfire hits apply the same temporary Move and Charge penalties',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  for(const [definitionId,weaponId] of [['night-spinner','doomweaver'],['sorcerer','agonising-energies']] as const){
+    const raw=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===definitionId)!;
+    const definition={...raw,attachment:undefined},s=createTestMatch();
+    s.phase='Shooting';s.definitions=[definition,s.definitions[1]!];
+    s.players[0]!.factionId=definition.factionId;s.armies[0]!.factionId=definition.factionId;
+    s.units[0]=createUnit(definition,'unit-1','player-1',[{x:5,y:5}]);
+    s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*1.5,y:10});
+    const e=engine(s);pass(e);
+    ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget(weaponId,'unit-2'));pass(e);
+    ok(e.fireWeapon(weaponId,'unit-2',()=>.6));
+    const after=e.getState();
+    assert.equal(effectiveCharacteristic(after,'unit-2','MOVE',6),4,definitionId);
+    assert.equal(chargeAllowance(after,7,[],'unit-2'),5,definitionId);
+    assert.deepEqual(new GameEngine(after).getState(),after);
+    after.turn=3;after.activePlayerId='player-1';expireEffects(after,'COMMAND_START');
+    assert.equal(effectiveCharacteristic(after,'unit-2','MOVE',6),6);
+    assert.equal(chargeAllowance(after,7,[],'unit-2'),7);
+  }
+});
+test('a missed Doomweaver and a Sorcerer hit on a Vehicle leave movement unaffected',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  for(const id of ['night-spinner','sorcerer'] as const){
+    const source=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)!,definition={...source,attachment:undefined},s=createTestMatch();
+    s.phase='Shooting';s.definitions=[definition,{...s.definitions[1]!,keywords:id==='sorcerer'?['VEHICLE']:['INFANTRY']}];
+    s.players[0]!.factionId=definition.factionId;s.armies[0]!.factionId=definition.factionId;
+    s.units[0]=createUnit(definition,'unit-1','player-1',[{x:5,y:5}]);s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*1.5,y:10});
+    const e=engine(s);pass(e);
+    const weapon=id==='sorcerer'?'agonising-energies':'doomweaver';
+    ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget(weapon,'unit-2'));pass(e);
+    ok(e.fireWeapon(weapon,'unit-2',id==='sorcerer'?()=>.6:()=>.01));
+    assert.equal(effectiveCharacteristic(e.getState(),'unit-2','MOVE',6),6);
+    assert.equal(chargeAllowance(e.getState(),7,[],'unit-2'),7);
+  }
+});
+test('Damaged vehicle Hit penalties use each datasheet threshold without changing the weapon profile',()=>{
+  for(const [id,weaponId,threshold] of [['wave-serpent','twin-shuriken-cannon',4],['night-spinner','doomweaver',4],['chaos-land-raider','soulshatter-lascannon',5]] as const){
+    const s=createTestMatch(),definition=[...AELDARI_DATASHEETS,...EMPERORS_CHILDREN_DATASHEETS].find(d=>d.id===id)!;
+    const u=createUnit(definition,'unit-1','player-1',[{x:4,y:4}]);
+    s.units[0]=u;s.definitions=[definition,s.definitions[1]!];s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+    const w=definition.weapons.find(x=>x.id===weaponId)!;
+    const resolution=(remaining:number)=>{
+      u.models[0]!.woundsRemaining=remaining;
+      const job=createAttackJob(w,[u.models[0]!.id],s.units[1]!,s.definitions[1]!,()=>.34,[],s);
+      runAttackJob(job,()=>.34,s);
+      return job.resolution.attackRecords![0]!;
+    };
+    assert.equal(resolution(threshold+1).hitSucceeded,true,id);
+    const damaged=resolution(threshold);
+    assert.equal(damaged.hitSucceeded,false,id);
+    assert.equal(damaged.modifiers.some(m=>m.source==='DAMAGED'&&m.amount===-1),true,id);
+    assert.equal(w.skill,3,id);
+  }
+});
+test('Wave Serpent Shield penalizes strong ranged wounds only, without changing weapons or saves',()=>{
+  const s=createTestMatch(),serpent=AELDARI_DATASHEETS.find(d=>d.id==='wave-serpent')!;
+  const target=createUnit(serpent,'unit-2','player-2',[{x:4,y:10}]);
+  s.definitions=[s.definitions[0]!,serpent];s.units[1]=target;
+  const base=s.definitions[0]!.weapons[0]!;
+  const strong={...base,attacks:{kind:'fixed' as const,value:1},strength:13,armourPenetration:0,damage:{kind:'fixed' as const,value:1}};
+  const resolve=(weapon:typeof strong,roll=.34)=>{
+    const job=createAttackJob(weapon,[s.units[0]!.models[0]!.id],target,serpent,()=>roll,[],s);
+    runAttackJob(job,()=>roll,s);
+    return job.resolution.attackRecords![0]!;
+  };
+  assert.equal(resolve(strong).woundSucceeded,false);
+  assert.equal(resolve(strong).modifiers.some(m=>m.source==='WAVE_SERPENT_SHIELD'&&m.amount===1),true);
+  assert.equal(resolve({...strong,strength:11},.5).woundSucceeded,true);
+  assert.equal(resolve({...strong,kind:'melee',range:null}).woundSucceeded,true);
+  assert.equal(strong.strength,13);
+  assert.equal(base.strength,s.definitions[0]!.weapons[0]!.strength);
+});
+test('Storm Guardian platform grants 5+ invulnerable saves then dies when the final Guardian falls',()=>{
+  const s=createTestMatch(),storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
+  const target=createUnit(storm,'unit-2','player-2',Array.from({length:11},(_,i)=>({x:4+i*1.5,y:10})));
+  s.definitions=[s.definitions[0]!,storm];s.units[1]=target;
+  assert.equal(target.models.filter(m=>m.profileRole==='STORM_GUARDIAN').length,10);
+  assert.equal(serpentShieldSave(target),5);
+  for(const model of target.models.slice(0,9)){model.alive=false;model.woundsRemaining=0;}
+  const base=s.definitions[0]!.weapons[0]!;
+  const shot={...base,attacks:{kind:'fixed' as const,value:1},strength:10,armourPenetration:-4,damage:{kind:'fixed' as const,value:1}};
+  const job=createAttackJob(shot,[s.units[0]!.models[0]!.id],target,storm,()=>.5,[],s);
+  runAttackJob(job,()=>.5,s);
+  assert.equal(job.resolution.saveResults[0]?.selected,'INVULNERABLE');
+  assert.equal(job.resolution.saveResults[0]?.saved,false);
+  assert.deepEqual(job.resolution.destroyedModelIds.sort(),[target.models[9]!.id,target.models[10]!.id].sort());
+  assert.equal(job.target.models.at(-1)?.alive,false);
+  assert.equal(serpentShieldSave(job.target),undefined);
+  assert.equal(target.models.at(-1)?.alive,true); // detached attack job leaves source state untouched until commit
+});
+test('Dark Reapers selectively ignore Ballistic Skill and Hit modifiers on ranged attacks only',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const s=createTestMatch(),reapers=AELDARI_DATASHEETS.find(d=>d.id==='dark-reapers')!;
+  s.definitions=[reapers,s.definitions[1]!];s.units[0]=createUnit(reapers,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:4})));
+  s.players[0]!.factionId=reapers.factionId;s.armies[0]!.factionId=reapers.factionId;
+  const e=engine(s);const unit=e.getState().units[0]!,weapon=reapers.weapons.find(w=>w.id==='reaper-launcher-starshot')!;
+  for(const [source,characteristic,value] of [['test-bs','BS',1],['test-hit','HIT_ROLL',-1]] as const)
+    ok(e.addTemporaryEffect({source,target:{unitId:'unit-1'},payload:{kind:'MODIFIER',characteristic,value},expiry:'END_OF_CURRENT_PHASE',stacking:'STACK'}));
+  const state=e.getState(),target=state.units[1]!,definition=state.definitions[1]!;
+  const resolve=(choices:Parameters<typeof createAttackJob>[8])=>{
+    const job=createAttackJob(weapon,[unit.models[0]!.id],target,definition,()=>.34,[],state,undefined,choices);
+    runAttackJob(job,()=>.34,state);return job.resolution.attackRecords![0]!;
+  };
+  assert.equal(resolve({}).hitSucceeded,false);
+  assert.equal(resolve({ignoredAccuracyModifiers:{bs:['test-bs']}}).hitSucceeded,false);
+  const clean=resolve({ignoredAccuracyModifiers:{bs:['test-bs'],hit:['test-hit']}});
+  assert.equal(clean.hitSucceeded,true);
+  assert.equal(clean.modifiers.some(m=>m.source==='test-bs'||m.source==='test-hit'),false);
+  assert.equal(reapers.weapons.find(w=>w.id===weapon.id)?.skill,3);
+  const other={...state,definitions:[{...reapers,abilities:[]},definition]};
+  const plain=createAttackJob(weapon,[unit.models[0]!.id],target,definition,()=>.34,[],other,undefined,{ignoredAccuracyModifiers:{bs:['test-bs'],hit:['test-hit']}});
+  runAttackJob(plain,()=>.34,other);
+  assert.equal(plain.resolution.attackRecords?.[0]?.hitSucceeded,false);
+  const snapshot=e.getState();assert.deepEqual(new GameEngine(snapshot).getState(),snapshot);
+});
+test('mixed squads expose independent weapon, wounds, base and objective control',()=>{
+  const storm=AELDARI_DATASHEETS.find(d=>d.id==='storm-guardians')!;
+  const u=createUnit(storm,'storm','p',Array.from({length:11},(_,i)=>({x:i,y:0})));
+  assert.deepEqual(u.models.filter(m=>m.weaponIds?.includes('guardian-fusion-gun')).length,2);
+  assert.deepEqual(u.models.at(-1)?.stats?.objectiveControl,0);
+  assert.deepEqual(u.models.at(-1)?.base.diameterMm,40);
+  assert.equal(u.models.at(-1)?.woundsRemaining,2);
+  const dragons=createUnit(AELDARI_DATASHEETS.find(d=>d.id==='fire-dragons')!,'dragons','p',Array.from({length:5},(_,i)=>({x:i,y:0})));
+  assert.equal(dragons.models.at(-1)?.woundsRemaining,2);
+  assert.equal(dragons.models.filter(m=>m.weaponIds?.includes('exarch-dragon-fusion-gun')).length,1);
+});
+test('Bladestorm is resolved from the bearer datasheet at half range without editing weapon data',()=>{
+  const s=createTestMatch();
+  const d=AELDARI_DATASHEETS.find(d=>d.id==='dire-avengers')!;
+  const unit=createUnit(d,'unit-1','player-1',Array.from({length:10},(_,i)=>({x:3+i*1.5,y:3})));
+  s.definitions=[d,s.definitions[1]!];s.units[0]=unit;
+  const target=s.units[1]!;
+  target.models.forEach((m,i)=>m.position={x:3+i*1.5,y:9});
+  const w=d.weapons.find(w=>w.id==='avenger-shuriken-catapult')!;
+  const close=createAttackJob(w,[unit.models[0]!.id],target,s.definitions.find(x=>x.id===target.definitionId)!,()=>.99,[],s);
+  assert.equal(close.contexts[0]!.abilities.some(a=>a.source==='BLADESTORM' && a.type==='SUSTAINED_HITS' && a.value===1),true);
+  target.models.forEach(m=>m.position={x:m.position.x,y:15});
+  const far=createAttackJob(w,[unit.models[0]!.id],target,s.definitions.find(x=>x.id===target.definitionId)!,()=>.99,[],s);
+  assert.equal(far.contexts[0]!.abilities.some(a=>a.source==='BLADESTORM'),false);
+  assert.equal(w.weaponAbilities?.some(a=>a.type==='SUSTAINED_HITS'),false);
+});
+test('Guardian Battlehost objective bonus uses original model keywords on an Attached unit',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(42);
+  const guardian=s.units.find(u=>u.id==='storm-council')!,enemy=s.units.find(u=>u.id==='noise-command')!;
+  guardian.location='BATTLEFIELD';enemy.location='BATTLEFIELD';
+  const body=guardian.models.find(m=>m.sourceDefinitionId==='storm-guardians')!,seer=guardian.models.find(m=>m.sourceDefinitionId==='farseer')!;
+  body.position={x:6,y:11};seer.position={x:20,y:3};
+  enemy.models.forEach((m,i)=>m.position={x:30+i*1.5,y:30});
+  const attachedWeapons=s.definitions.find(d=>d.id===guardian.definitionId)!.weapons;
+  const weapon=attachedWeapons.find(w=>w.id==='storm-guardians:shuriken-pistol')!;
+  const targetDefinition=s.definitions.find(d=>d.id===enemy.definitionId)!;
+  const bodyJob=createAttackJob(weapon,[body.id],enemy,targetDefinition,()=>0,[],s);
+  runAttackJob(bodyJob,()=>0,s);
+  assert.equal(bodyJob.resolution.attackRecords?.[0]?.modifiers.some(m=>m.source==='DEFEND_AT_ALL_COSTS'),true);
+  const seerWeapon=attachedWeapons.find(w=>w.id==='farseer:shuriken-pistol')!;
+  const seerJob=createAttackJob(seerWeapon,[seer.id],enemy,targetDefinition,()=>0,[],s);
+  runAttackJob(seerJob,()=>0,s);
+  assert.equal(seerJob.resolution.attackRecords?.[0]?.modifiers.some(m=>m.source==='DEFEND_AT_ALL_COSTS'),false);
+});
+test('Stormblades and Objective Defiled secure controlled objectives via the shared Command resolver',()=>{
+  for(const [unitId,playerId,source] of [['storm-council','player-1','STORMBLADES'],['tormentor-command','player-2','OBJECTIVE_DEFILED']] as const){
+    const s=createAeldariVsEmperorsChildrenMatch(9),unit=s.units.find(u=>u.id===unitId)!;
+    s.activePlayerId=playerId;unit.location='BATTLEFIELD';
+    unit.models.forEach((m,i)=>m.position={x:3+(i%7)*2,y:3+Math.floor(i/7)*2});unit.models[0]!.position={x:16,y:19};
+    s.phase='Command';s.flow!.commandStep='END_OF_COMMAND_PHASE';s.flow!.missionHookStarted=true;
+    assert.equal(new CommandController(s).advance().ok,true);
+    const objective=s.mission!.objectives.find(o=>o.id==='site-2')!;
+    assert.equal(objective.securedByPlayerId,playerId);
+    assert.equal(objective.securedSource,source);
+    assert.equal(secureFactionObjectives(s).length,0);
+    assert.equal(JSON.parse(JSON.stringify(s)).mission.objectives.find((o:{id:string})=>o.id==='site-2')?.securedByPlayerId,playerId);
+  }
+});
+test('Psychic Communion freezes 0–2 other battlefield Aeldari Psykers on selection and buffs Destructor only',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const warlock={...AELDARI_DATASHEETS.find(d=>d.id==='warlock')!,attachment:undefined},farseer={...AELDARI_DATASHEETS.find(d=>d.id==='farseer')!,attachment:undefined};
+  for(let count=0;count<=3;count++){
+    const s=createTestMatch();s.phase='Shooting';s.definitions=[warlock,s.definitions[1]!,farseer];
+    s.units[0]=createUnit(warlock,'unit-1','player-1',[{x:5,y:5}]);
+    s.players[0]!.factionId=warlock.factionId;s.armies[0]!.factionId=warlock.factionId;
+    for(let i=0;i<count;i++) {const u=createUnit(farseer,`seer-${i}`,'player-1',[{x:6.5+i*1.5,y:5}]);u.location='BATTLEFIELD';s.units.push(u);s.armies[0]!.unitIds.push(u.id);}
+    const distant=createUnit(farseer,'reserve-seer','player-1',[{x:5,y:5}]);distant.location='RESERVES';s.units.push(distant);s.armies[0]!.unitIds.push(distant.id);
+    assert.equal(psychicCommunionBonus(s,s.units[0]!),Math.min(2,count));
+    const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));
+    const state=e.getState(),view=factionAttackWeapon(state,state.units[0]!,warlock.weapons.find(w=>w.id==='destructor')!);
+    assert.equal(state.shooting?.psychicCommunionBonus,Math.min(2,count));
+    assert.equal(view.strength,5+Math.min(2,count));
+    assert.deepEqual(view.attacks,{kind:'dice',count:1,sides:6,modifier:Math.min(2,count)});
+    assert.equal(warlock.weapons.find(w=>w.id==='destructor')?.strength,5);
+    assert.equal(factionAttackWeapon(state,state.units[0]!,warlock.weapons.find(w=>w.id==='shuriken-pistol')!).strength,4);
+    assert.deepEqual(new GameEngine(state).getState(),state);
+  }
+});
+test('Excessive Assault rerolls wound ones and permits any wound reroll only near an objective',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(12),infractors=s.units.find(u=>u.id==='infractor-command')!,target=s.units.find(u=>u.id==='storm-council')!;
+  infractors.location='BATTLEFIELD';target.location='BATTLEFIELD';
+  const weapon=s.definitions.find(d=>d.id===infractors.definitionId)!.weapons.find(w=>w.id==='infractors:duelling-sabre')!;
+  const definition=s.definitions.find(d=>d.id===target.definitionId)!;
+  const model=infractors.models.find(m=>m.sourceDefinitionId==='infractors')!;
+  const roll=(attack:typeof weapon,first:number,choices:Parameters<typeof createAttackJob>[8]={})=>{
+    const seq=[.5,first,.9,.01];let index=0;
+    const rng=()=>seq[index++]??.5;
+    const job=createAttackJob(attack,[model.id],target,definition,rng,[],s,undefined,choices);
+    runAttackJob(job,rng,s);return job.resolution.attackRecords![0]!;
+  };
+  target.models.forEach(m=>m.position={x:30,y:25});
+  const ordinary=factionAttackWeapon(s,infractors,weapon,target);
+  assert.equal(ordinary.rerollPermissions?.find(p=>p.kind==='WOUND')?.source,'EXCESSIVE_ASSAULT');
+  assert.equal(roll(ordinary,.01).wound?.wasRerolled,true);
+  assert.equal(roll(ordinary,.18).wound?.wasRerolled,false);
+  assert.equal(validAttackChoices(ordinary,{rerolls:{WOUND:'ALL'}}),false);
+  target.models[0]!.position={x:16,y:19};
+  const objective=factionAttackWeapon(s,infractors,weapon,target);
+  assert.equal(validAttackChoices(objective,{rerolls:{WOUND:'ALL'}}),true);
+  assert.equal(roll(objective,.18,{rerolls:{WOUND:'ALL'}}).wound?.wasRerolled,true);
+  assert.equal(weapon.rerollPermissions,undefined);
+});
+test('Lord Host grants only its bearer Scouts and Infiltrators inside a Battleline attachment',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(13),infractors=s.units.find(u=>u.id==='infractor-command')!,lord=infractors.models.find(m=>m.sourceDefinitionId==='lord-exultant')!;
+  assert.equal(abilitiesFor(s,infractors,lord).some(a=>a.kind==='SCOUTS'&&a.distance===6),true);
+  assert.equal(abilitiesFor(s,infractors,lord).some(a=>a.kind==='INFILTRATORS'),true);
+  assert.equal(allHave(s,infractors,'SCOUTS'),true);
+  assert.equal(scoutDistance(s,infractors),6);
+  assert.equal(allHave(s,infractors,'INFILTRATORS'),false);
+  const tormentors=s.units.find(u=>u.id==='tormentor-command')!,record=s.attachments!.find(a=>a.id===tormentors.id)!;
+  record.components.find(c=>c.role==='LEADER')!.original.definitionId='lord-exultant';
+  const original=tormentors.models.find(m=>m.sourceDefinitionId==='sorcerer')!;
+  original.sourceDefinitionId='lord-exultant';original.componentUnitId=record.components.find(c=>c.role==='LEADER')!.original.id;
+  assert.equal(allHave(s,tormentors,'INFILTRATORS'),true);
+  assert.equal(allHave(s,tormentors,'SCOUTS'),false);
+  record.active=false;
+  assert.equal(abilitiesFor(s,tormentors,original).some(a=>a.kind==='SCOUTS'),false);
+});
+test('Euphoric Strikes is optional, model scoped, once per battle and expires after Fight',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const raw=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-exultant')!,lord={...raw,attachment:undefined},s=createTestMatch();
+  s.phase='Fight';s.definitions=[lord,s.definitions[1]!];s.players[0]!.factionId=lord.factionId;s.armies[0]!.factionId=lord.factionId;
+  s.units[0]=createUnit(lord,'unit-1','player-1',[{x:4.5,y:4.5}]);
+  const initial=engine(s).getState();
+  initial.flow!.window={id:'window-1',trigger:'START_OF_PHASE',playerId:'player-1',passedPlayerIds:[]};
+  const e=new GameEngine(initial),original=e.getState(),modelId=original.units[0]!.models[0]!.id;
+  assert.equal(effectiveCharacteristic(original,'unit-1','ATTACKS',5,modelId),5);
+  ok(e.activateEuphoricStrikes('unit-1'));
+  const active=e.getState();
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5,modelId),8);
+  assert.equal(effectiveCharacteristic(active,'unit-1','AP',-2,modelId),-3);
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5),5);
+  assert.equal(e.activateEuphoricStrikes('unit-1').ok,false);
+  assert.deepEqual(new GameEngine(active).getState(),active);
+  expireEffects(active,'PHASE_END');
+  assert.equal(effectiveCharacteristic(active,'unit-1','ATTACKS',5,modelId),5);
+  assert.equal(new GameEngine(active).activateEuphoricStrikes('unit-1').ok,false);
+  assert.equal(lord.weapons.find(w=>w.id==='phoenix-power-spear')?.attacks.kind,'fixed');
+});
+test('Terrifying Crescendo selects one hit target after Shooting and expires at the next own Shooting start',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const noise=EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='noise-marines')!,s=createTestMatch();
+  s.phase='Shooting';s.definitions=[noise,s.definitions[1]!];s.players[0]!.factionId=noise.factionId;s.armies[0]!.factionId=noise.factionId;
+  s.definitions=[noise,{...s.definitions[1]!,stats:{...s.definitions[1]!.stats,leadership:8}}];
+  s.units[0]=createUnit(noise,'unit-1','player-1',Array.from({length:6},(_,i)=>({x:4+i*2,y:5})));
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4+i*1.5,y:10});
+  const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('sonic-blaster','unit-2'));pass(e);
+  ok(e.fireWeapon('sonic-blaster','unit-2',()=>.55));ok(e.completeShooting());
+  assert.deepEqual(postShotHitTargets(e.getState(),e.getState().units[0]!).map(u=>u.id),['unit-2']);
+  assert.equal(e.useTerrifyingCrescendo('unit-1','unit-1').ok,false);
+  ok(e.useTerrifyingCrescendo('unit-1','unit-2'));
+  const after=e.getState();assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),9);
+  assert.equal(resolveBattleShockRoll(after,after.units[1]!,()=>.5).success,false);
+  assert.equal(e.useTerrifyingCrescendo('unit-1','unit-2').ok,false);
+  assert.deepEqual(new GameEngine(after).getState(),after);
+  after.turn=2;after.activePlayerId='player-2';expireEffects(after,'SHOOTING_START');
+  assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),9);
+  after.turn=3;after.activePlayerId='player-1';expireEffects(after,'SHOOTING_START');
+  assert.equal(effectiveCharacteristic(after,'unit-2','LEADERSHIP',8),8);
+  assert.equal(resolveBattleShockRoll(after,after.units[1]!,()=>.5).success,true);
+});
+test('Doom Siren rolls deterministic 3D6 after a hit, spills mortal wounds and tests Battle-shock',async()=>{
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const source={...EMPERORS_CHILDREN_DATASHEETS.find(d=>d.id==='lord-kakophonist')!,attachment:undefined},s=createTestMatch();
+  s.phase='Shooting';s.definitions=[source,{...s.definitions[1]!,keywords:['INFANTRY']}];
+  s.players[0]!.factionId=source.factionId;s.armies[0]!.factionId=source.factionId;
+  s.units[0]=createUnit(source,'unit-1','player-1',[{x:5,y:5}]);s.units[1]!.models.forEach((m,i)=>m.position={x:5+i*2,y:10});
+  const e=engine(s);pass(e);ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('screamer-pistol','unit-2'));pass(e);
+  ok(e.fireWeapon('screamer-pistol','unit-2',()=>.8));ok(e.completeShooting());
+  const before=e.getState();let called=false;
+  assert.equal(e.useDoomSiren('unit-1','unit-1',()=>{called=true;return .9;}).ok,false);
+  assert.equal(called,false);assert.deepEqual(e.getState(),before);
+  const sequence=[.51,.17,.99,.01,.01];let next=0;
+  const result=ok(e.useDoomSiren('unit-1','unit-2',()=>sequence[next++]??.01));
+  assert.deepEqual(result.rolls,[4,2,6]);assert.equal(result.mortalWounds,2);
+  assert.equal(e.getState().units[1]!.state.battleShocked,true);
+  assert.equal(e.getState().events.some(x=>x.type==='flow'&&x.name==='DOOM_SIREN_RESOLVED'),true);
+  assert.equal(e.useDoomSiren('unit-1','unit-2',()=>.99).ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+test('Path of Command explicitly discounts one targeted Stratagem per army per round and survives snapshots',async()=>{
+  const {engine,ok}=await import('./flow.helpers');
+  const autarch={...AELDARI_DATASHEETS.find(d=>d.id==='autarch')!,attachment:undefined},s=createTestMatch();
+  s.phase='Movement';s.definitions=[autarch,s.definitions[1]!];s.players[0]!.factionId=autarch.factionId;s.armies[0]!.factionId=autarch.factionId;
+  s.players[0]!.commandPoints=1;s.units[0]=createUnit(autarch,'unit-1','player-1',[{x:5,y:5}]);
+  s.stratagemDefinitions=[{id:'technical-ward',name:'Ward',labels:['STRATEGIC_PLOY'],cpCost:2,
+    timing:{phases:['Movement'],triggers:['START_OF_PHASE'],ownership:'YOUR_TURN'},target:{relation:'FRIENDLY',count:1},
+    resolverId:'APPLY_EFFECT',effect:{source:'technical-ward',payload:{kind:'FLAG',flag:'TECHNICAL_WARD',value:true},expiry:'END_OF_CURRENT_PHASE',stacking:'REPLACE_SAME_SOURCE'}}];
+  const initial=engine(s).getState();initial.flow!.window={...initial.flow!.window!,trigger:'START_OF_PHASE'};
+  const e=new GameEngine(initial);
+  assert.equal(e.useStratagem('technical-ward','player-1',['unit-1']).ok,false);
+  ok(e.useStratagem('technical-ward','player-1',['unit-1'],undefined,undefined,true));
+  const after=e.getState();assert.equal(after.players[0]!.commandPoints,0);
+  assert.equal(after.flow!.usage.filter(u=>u.stratagemId==='PATH_OF_COMMAND').length,1);
+  assert.equal(after.events.some(x=>x.type==='flow'&&x.name==='STRATAGEM_USED'&&x.detail.cost===1),true);
+  const rejected=e.useStratagem('technical-ward','player-1',['unit-1'],undefined,undefined,true);
+  assert.equal(rejected.ok,false);if(!rejected.ok)assert.equal(rejected.reason,'USAGE_LIMIT');
+  assert.deepEqual(new GameEngine(after).getState(),after);
+});
+test('an attached Character left without Storm Guardians cannot secure an objective through Stormblades',()=>{
+  const s=createAeldariVsEmperorsChildrenMatch(8),unit=s.units.find(u=>u.id==='storm-council')!;
+  unit.location='BATTLEFIELD';unit.models.filter(m=>m.componentUnitId==='storm-guardians').forEach(m=>{m.alive=false;m.woundsRemaining=0;});
+  unit.models.find(m=>m.sourceDefinitionId==='farseer')!.position={x:16,y:19};
+  assert.deepEqual(secureFactionObjectives(s),[]);
+  assert.equal(s.mission!.objectives.find(o=>o.id==='site-2')?.securedByPlayerId,null);
+});
+test('Incursion rosters total 990 and 1000 including enhancement',()=>{
+  assert.equal(AELDARI_PRESET.units.length,10);
+  assert.equal(EMPERORS_CHILDREN_PRESET.units.length,9);
+  assert.equal(AELDARI_PRESET.units.find(u=>u.enhancementId)?.id,'farseer');
+});
+test('seeded match is stable, detached and ready for deployment with attached passengers',()=>{
+  const a=createAeldariVsEmperorsChildrenMatch(42),b=createAeldariVsEmperorsChildrenMatch(42);
+  assert.deepEqual(a,b);
+  assert.equal(a.deployment?.stage,'DECLARE_BATTLE_FORMATIONS');
+  assert.equal(a.mission?.definition.id,'PROVING_GROUND');
+  assert.equal(a.units.find(u=>u.id==='infractor-command')?.location,'EMBARKED');
+  assert.equal(a.units.find(u=>u.id==='flawless-blades')?.embarked?.transportId,'chaos-land-raider');
+  assert.equal(a.attachments?.length,5);
+  const engine=GameEngine.create(a);
+  const snapshot=engine.getState();snapshot.units[0]!.models[0]!.woundsRemaining=0;
+  assert.notEqual(engine.getState().units[0]!.models[0]!.woundsRemaining,0);
+  engine.loadMatch(JSON.parse(JSON.stringify(a)));
+  assert.deepEqual(engine.getState(),a);
+});
+
+test('universal Shock and Assault disembark permissions use transport data', async()=>{
+  const { embarked, ok }=await import('./transports.helpers');
+  const shock=embarked(),rhino=shock.units.find(u=>u.id==='transport-b')!;
+  (shock.definitions.find(d=>d.id===rhino.definitionId)!.transport as {afterAdvance?:string}).afterAdvance='SHOCK';
+  rhino.state.hasAdvanced=true;
+  const a=new GameEngine(shock);
+  assert.equal(ok(a.getDisembarkMode('attached')).mode,'SHOCK');
+  ok(a.beginDisembark('attached'));
+  assert.equal(a.getState().transportState?.disembark?.mode,'SHOCK');
+  const assault=embarked(),raider=assault.units.find(u=>u.id==='transport-b')!;
+  (assault.definitions.find(d=>d.id===raider.definitionId)!.transport as {afterNormalMove?:string}).afterNormalMove='ASSAULT';
+  raider.lastMove={kind:'NORMAL_MOVE',turn:1,phase:'Movement'};
+  const b=new GameEngine(assault);
+  assert.equal(ok(b.getDisembarkMode('attached')).mode,'ASSAULT');
+  ok(b.beginDisembark('attached'));
+  assert.equal(b.getState().transportState?.disembark?.mode,'ASSAULT');
+});
+
+test('Aspect Shrine substitutes one paused die without changing weapon or consuming another token',async()=>{
+  const { createTestMatch }=await import('../src/game/data/prototype');
+  const { engine, ok, pass }=await import('./flow.helpers');
+  const s=createTestMatch();s.phase='Shooting';
+  const d={...s.definitions[0]!,modelCount:5,abilities:[{id:'ASPECT_SHRINE',name:'Aspect Shrine',parameters:{}}]};
+  s.definitions=[d,s.definitions[1]!];
+  s.units[0]=createUnit(d,'unit-1','player-1',Array.from({length:5},(_,i)=>({x:4+i*1.5,y:4.5})));
+  const e=engine(s);pass(e);
+  assert.equal(e.getState().units[0]?.resourceCounters?.ASPECT_SHRINE,1);
+  ok(e.beginShooting('unit-1'));ok(e.selectShootingTarget('test-rifle','unit-2'));pass(e);
+  const before=e.getState().definitions[0]!.weapons[0]!;
+  ok(e.fireWeapon('test-rifle','unit-2',()=>.01));
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_HIT_ROLL');
+  ok(e.spendAspectShrineToken());
+  assert.equal(e.getState().units[0]?.resourceCounters?.ASPECT_SHRINE,0);
+  assert.equal(e.getState().attackJob?.current?.hit?.value,6);
+  assert.equal(e.spendAspectShrineToken().ok,false);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+  assert.deepEqual(e.getState().definitions[0]!.weapons[0],before);
+});
+
+test('Battle Focus Incursion tokens gate movement buff and one manoeuvre per unit per phase', async()=>{
+  const { createTestMatch }=await import('../src/game/data/prototype');
+  const { engine, ok, pass }=await import('./flow.helpers');
+  const s=createTestMatch();s.phase='Movement';
+  s.factionRuleIds={'player-1':['BATTLE_FOCUS']};
+  s.battleFocus={battleSize:'INCURSION',round:0,tokens:{},usedByPhase:{},manoeuvresByPhase:{}};
+  const e=engine(s);pass(e);
+  assert.equal(e.getState().battleFocus?.tokens['player-1'],2);
+  ok(e.useAgileManoeuvre('SWIFT_AS_THE_WIND','unit-1','MOVE','NORMAL_MOVE'));
+  assert.equal(e.getState().battleFocus?.tokens['player-1'],1);
+  assert.equal(e.useAgileManoeuvre('FLITTING_SHADOWS','unit-1','MOVE').ok,false);
+  ok(e.beginMovement('unit-1'));
+  const original=e.getState().units[0]!.models[0]!.position;
+  ok(e.moveModel('unit-1:model:1',{x:original.x,y:original.y+8}));
+  ok(e.cancelMovement());
+  assert.deepEqual(e.getState().units[0]!.models[0]!.position,original);
+  assert.equal(e.getState().battleFocus?.tokens['player-1'],1);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});
+
+test('Opportunity Seized reaction rolls D6+1 and moves using the same spatial validators',async()=>{
+  const {createTestMatch}=await import('../src/game/data/prototype');
+  const {engine,ok,pass}=await import('./flow.helpers');
+  const s=createTestMatch();s.turn=2;s.activePlayerId='player-2';s.phase='Movement';
+  s.factionRuleIds={'player-1':['BATTLE_FOCUS']};
+  s.battleFocus={battleSize:'INCURSION',round:0,tokens:{},usedByPhase:{},manoeuvresByPhase:{}};
+  s.units[1]!.models.forEach((m,i)=>m.position={x:4.5+i*1.5,y:6.2});
+  const e=engine(s);pass(e);
+  ok(e.beginMovement('unit-2','FALL_BACK_MOVE',()=>.99));
+  for(const m of e.getState().units[1]!.models) ok(e.moveModel(m.id,{x:m.position.x,y:11}));
+  ok(e.completeMovement());
+  assert.equal(e.getState().flow?.window?.trigger,'AFTER_ENEMY_FALL_BACK');
+  ok(e.useAgileManoeuvre('OPPORTUNITY_SEIZED','unit-1','ENEMY_FALL_BACK',undefined,()=>0));
+  assert.equal(e.getState().reactionMove?.allowance,2);
+  const before=e.getState();
+  assert.equal(e.moveReactionModel('unit-1:model:1',{x:-4,y:4}).ok,false);
+  assert.deepEqual(e.getState(),before);
+  for(const m of e.getState().units[0]!.models) ok(e.moveReactionModel(m.id,{x:m.position.x,y:m.position.y+2}));
+  ok(e.completeReactionMove());
+  assert.equal(e.getState().reactionMove,null);
+  assert.deepEqual(new GameEngine(e.getState()).getState(),e.getState());
+});

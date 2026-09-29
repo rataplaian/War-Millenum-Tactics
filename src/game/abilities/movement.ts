@@ -1,13 +1,16 @@
 import type { GameState, Model, Unit } from '../models';
 import { unitHasCore } from './registry';
 import { modelKeywords } from '../attachments/queries';
+import { canUseSuperlativeStrategist } from '../content/strategist';
 export interface MovementAbilityChoices {
+    rerollAdvance?: boolean;
     takingToSkies?: boolean;
     mobile?: boolean;
 }
 /** 21.03/24.17/24.35: choices last for one movement transaction only. */
 export function validateMovementAbilities(s: GameState, u: Unit, choices: MovementAbilityChoices, charge = false) {
-    return (!choices.takingToSkies || u.models.some(m => m.alive && modelKeywords(s, u, m).includes('FLY'))) &&
+    return (!choices.rerollAdvance || (!charge && canUseSuperlativeStrategist(s,u))) &&
+        (!choices.takingToSkies || u.models.some(m => m.alive && modelKeywords(s, u, m).includes('FLY'))) &&
         (!choices.mobile || (!charge && unitHasCore(s, u, 'SUPER_HEAVY_WALKER')));
 }
 export function movementAbilities(s: GameState, m: Model) {

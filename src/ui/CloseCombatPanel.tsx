@@ -13,6 +13,7 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
   const [targets, setTargets] = useState<string[]>([]);
   const combat = state.closeCombat, fight = combat?.fight;
   const chosen = fight?.selected && state.units.find(u => u.id === fight.selected!.unitId);
+  const faction = engine.getFactionDebugOptions();
   const enemies = state.units.filter(u => u.models.some(m => m.alive));
   const toggle = (id: string) => setTargets(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
   const run = (result: CommandResult<unknown>, message = 'Action completed.') => { report(result, message); if (result.ok) setTargets([]); };
@@ -21,7 +22,8 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
     <Text style={{ color: '#fff', fontSize: 18 }}>Charge / Fight debug</Text>
     {state.phase === 'Charge' && <>
       {!combat?.charge && state.units.filter(u => u.playerId === state.activePlayerId).map(u =>
-        <Button key={u.id} title={`CHARGE: ${label(u.id)}`} onPress={() => run(engine.declareCharge(u.id, rng), 'Charge rolled. Select targets after the roll.')} />)}
+        <View key={u.id} style={{gap:4}}><Button title={`CHARGE: ${label(u.id)}`} onPress={() => run(engine.declareCharge(u.id, rng), 'Charge rolled. Select targets after the roll.')} />
+          {state.battleFocus && <Button title={`FLITTING SHADOWS · ${label(u.id)}`} onPress={()=>run(engine.useAgileManoeuvre('FLITTING_SHADOWS',u.id,'CHARGE'))} />}</View>)}
       {combat?.charge && <>
         <Text style={{ color: '#fcd34d' }}>2D6: {combat.charge.rolls.join(' + ')} = {combat.charge.distance}″</Text>
         {!combat.move && <>
@@ -33,6 +35,14 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
     </>}
     {state.phase === 'Fight' && <>
       <Text style={{ color: '#fff' }}>Step: {fight?.step ?? 'Not started'} · {fight?.category ?? ''}</Text>
+      {state.fightOnDeath?.map(p=>{
+        const unit=state.units.find(u=>u.id===p.defenderUnitId);
+        return <View key={`${p.defenderUnitId}:${p.attackerUnitId}`} style={{gap:4}}>
+          <Text style={{color:'#fcd34d'}}>Fight on Death · {p.defenderUnitId} · {p.modelIds.length} models</Text>
+          {unit && meleeWeapons(state,unit).map(w=><Button key={w.id} title={`RESOLVE FIGHT ON DEATH · ${w.name}`}
+            onPress={()=>run(engine.resolveFightOnDeath(unit.id,w.id,rng),'Fight on Death resolved.')} />)}
+        </View>;
+      })}
       {!fight && <Button title="START FIGHT PHASE" onPress={() => run(engine.startFightPhase())} />}
       {fight && !combat?.move && !fight.selected && <Button title="NEXT FIGHT STEP" onPress={() => run(engine.advanceFightStep())} />}
       {fight && ['PILE_IN', 'CONSOLIDATE'].includes(fight.step) && !combat?.move && <>
@@ -49,11 +59,22 @@ export function CloseCombatPanel({ state, engine, rng, report }: {
       </>}
       {chosen && !combat?.move && <>
         <Text style={{ color: '#fff' }}>Fighting: {label(chosen.id)}</Text>
+        {state.battleFocus && <Button title="BATTLE FOCUS · SUDDEN STRIKE" onPress={()=>run(engine.useAgileManoeuvre('SUDDEN_STRIKE',chosen.id,'FIGHT'))} />}
+        {faction.exquisite && <View style={{gap:4}}>
+          <Button title="EXQUISITE SWORDSMANSHIP · LETHAL HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('LETHAL_HITS'))} />
+          <Button title="EXQUISITE SWORDSMANSHIP · SUSTAINED HITS" onPress={()=>run(engine.chooseExquisiteSwordsmanship('SUSTAINED_HITS'))} />
+        </View>}
+        {faction.patrons===chosen.id && <Button title="DAEMONIC PATRONS" onPress={()=>run(engine.activateDaemonicPatrons(chosen.id))} />}
         {enemies.filter(u => u.playerId !== chosen.playerId).map(target => <View key={target.id} style={{ gap: 4 }}>
           <Button title={`${targets.includes(target.id) ? '✓ ' : ''}OVERRUN TARGET: ${label(target.id)}`} onPress={() => toggle(target.id)} />
-          {meleeWeapons(state, chosen).map(w => <View key={w.id}><Button key={w.id} title={`${w.name} → ${label(target.id)}`}
-            disabled={!getModelsEligibleToFight(state, chosen, target).some(m => !fight!.selected!.usedModelIds.includes(m.id))}
-            onPress={() => run(engine.meleeAttack(w.id, target.id, rng), 'Melee resolved. See wounds and combat log.')} />{engine.precisionTargets(chosen.id, w.id, target.id).map(id => <Button key={id} title={`PRECISION ${w.name} → ${id}`} onPress={() => run(engine.meleeAttack(w.id, target.id, rng, id), 'Precision melee resolved.')} />)}</View>)}
+          {meleeWeapons(state, chosen).map(w => <View key={w.id}>
+            {!!state.flow && !!state.factionRuleIds && !fight?.selected?.selectedTarget && <Button title={`SELECT MELEE TARGET · ${w.name} → ${label(target.id)}`}
+              onPress={()=>run(engine.selectMeleeTarget(w.id,target.id),'Target selected. Resolve the reaction window before attacking.')} />}
+            <Button title={`${w.name} → ${label(target.id)}`}
+            disabled={!!state.flow && !!state.factionRuleIds && (fight?.selected?.selectedTarget?.weaponId!==w.id || fight?.selected?.selectedTarget?.targetUnitId!==target.id) || !getModelsEligibleToFight(state, chosen, target).some(m => !fight!.selected!.usedModelIds.includes(m.id))}
+            onPress={() => run(engine.meleeAttack(w.id, target.id, rng), 'Melee resolved. See wounds and combat log.')} />{engine.precisionTargets(chosen.id, w.id, target.id).map(id => <Button key={id} title={`PRECISION ${w.name} → ${id}`}
+              disabled={!!state.flow && !!state.factionRuleIds && (fight?.selected?.selectedTarget?.weaponId!==w.id || fight?.selected?.selectedTarget?.targetUnitId!==target.id)}
+              onPress={() => run(engine.meleeAttack(w.id, target.id, rng, id), 'Precision melee resolved.')} />)}</View>)}
         </View>)}
         <Button title="OVERRUN PILE IN" onPress={() => run(engine.beginOverrun(targets))} />
         <Button title="CANCEL FIGHT SELECTION" disabled={!!fight?.selected?.hasRolled || !!fight?.selected?.overrunDone} onPress={() => run(engine.cancelFightUnit())} />

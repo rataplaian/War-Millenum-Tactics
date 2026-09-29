@@ -4,6 +4,8 @@ import { pendingCoreChoices } from '../abilities/core';
 import { PHASES, type CommandResult, type GameState } from '../models';
 import { actionBusy, battleStarted, onBattlefield } from '../reserves/location';
 import { isUnitEngaged } from '../rules/spatial';
+import { recordMovementPhaseEngagement, recordTurnEngagement } from '../content/factionRules';
+import { resetBattleFocus } from '../content/BattleFocus';
 import { advancePhase } from '../rules/progression';
 import { failure } from '../rules/movement';
 import { CommandController } from '../command/CommandController';
@@ -30,9 +32,11 @@ export class MatchFlowController {
     const s = this.s, f = s.flow;
     if (!f || f.started || !battleStarted(s)) return;
     f.started = true; f.firstPlayerId = s.deployment?.firstTurnPlayerId ?? f.firstPlayerId;
-    flowEvent(s, 'BATTLE_ROUND_STARTED'); flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); this.enterPhase();
+    resetBattleFocus(s); recordTurnEngagement(s); flowEvent(s, 'BATTLE_ROUND_STARTED'); flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); this.enterPhase();
   }
   private enterPhase() {
+    if(this.s.phase==='Shooting') expireEffects(this.s,'SHOOTING_START');
+    if(this.s.phase==='Movement') recordMovementPhaseEngagement(this.s);
     flowEvent(this.s, 'PHASE_STARTED', { phase: this.s.phase }); openWindow(this.s, 'START_OF_PHASE');
     if (this.s.phase === 'Command') new CommandController(this.s, this.policies).enter('START_OF_COMMAND_PHASE');
   }
@@ -62,9 +66,9 @@ export class MatchFlowController {
     if (endTurn) { flowEvent(s, 'TURN_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'TURN_END'); }
     if (endRound) { flowEvent(s, 'BATTLE_ROUND_ENDED'); synchronizeMission(s, this.reserves); if (s.status === 'finished') return { ok: true, value: undefined }; expireEffects(s, 'ROUND_END'); }
     if (endRound && s.round >= f.rules.maximumBattleRounds) { s.status = 'finished'; f.boundary = 'NONE'; return { ok: true, value: undefined }; }
-    Object.assign(s, advancePhase(s)); f.phaseIndex++; f.boundary = 'NONE';
-    if (endRound) { for (const p of s.players) p.extraCpGainedThisBattleRound = 0; flowEvent(s, 'BATTLE_ROUND_STARTED'); }
-    if (endTurn) { flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); }
+    Object.assign(s, advancePhase(s)); f.phaseIndex++; delete f.battleShockResolvedPhase; f.boundary = 'NONE';
+    if (endRound) { for (const p of s.players) p.extraCpGainedThisBattleRound = 0; resetBattleFocus(s); flowEvent(s, 'BATTLE_ROUND_STARTED'); }
+    if (endTurn) { recordTurnEngagement(s); flowEvent(s, 'TURN_STARTED'); openWindow(s, 'START_OF_TURN'); }
     this.enterPhase(); return { ok: true, value: undefined };
   }
 }

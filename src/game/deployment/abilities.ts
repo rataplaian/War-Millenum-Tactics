@@ -1,7 +1,15 @@
-import { modelDefinition } from '../attachments/queries';
+import { attachmentFor, modelDefinition } from '../attachments/queries';
 import type { GameState, Model, Unit } from '../models';
 import type { CoreAbility } from '../setup/types';
-export const abilitiesFor = (s: GameState, u: Unit, m: Model): readonly CoreAbility[] => m.coreAbilities ?? modelDefinition(s, u, m).coreAbilities ?? [];
+export function abilitiesFor(s: GameState, u: Unit, m: Model): readonly CoreAbility[] {
+  const native=m.coreAbilities ?? modelDefinition(s,u,m).coreAbilities ?? [];
+  const attachment=attachmentFor(s,u.id);
+  const bodyguard=attachment?.components.find(c=>c.role==='BODYGUARD');
+  const bodyguardDefinition=s.definitions.find(d=>d.id===bodyguard?.original.definitionId);
+  if (!attachment || !bodyguardDefinition?.keywords.includes('BATTLELINE') || !bodyguardDefinition.keywords.includes('EMPERORS_CHILDREN') ||
+      !modelDefinition(s,u,m).abilities.some(a=>a.id==='LORD_HOST') || m.componentUnitId===bodyguard?.original.id) return native;
+  return [...native,{kind:'INFILTRATORS'},{kind:'SCOUTS',distance:6}];
+}
 export function allHave(s: GameState, u: Unit, kind: CoreAbility['kind']): boolean {
   const native = u.models.filter(m => m.alive);
   if (native.length && native.every(m => abilitiesFor(s, u, m).some(a => a.kind === kind))) return true;

@@ -6,7 +6,7 @@ import { COMMAND_STEPS } from './types';
 import { battleStarted } from '../reserves/location';
 const integer = (v: number, min = 0) => Number.isSafeInteger(v) && v >= min;
 const fail = () => { throw new Error('Invalid match-flow snapshot'); };
-const TRIGGERS = ['START_OF_PHASE', 'END_OF_PHASE', 'START_OF_TURN', 'END_OF_TURN', 'AT_START_OF_COMMAND_PHASE', 'AT_END_OF_COMMAND_PHASE', 'AFTER_TARGET_SELECTED', 'AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL', 'AFTER_UNIT_SHOT', 'AFTER_CHARGE_MOVE', 'AFTER_UNIT_FOUGHT', 'AFTER_BATTLE_SHOCK_FAILED'];
+const TRIGGERS = ['START_OF_PHASE', 'DURING_PHASE', 'END_OF_PHASE', 'START_OF_TURN', 'END_OF_TURN', 'AT_START_OF_COMMAND_PHASE', 'AT_END_OF_COMMAND_PHASE', 'AFTER_ENEMY_MOVE', 'AFTER_ENEMY_FALL_BACK', 'AFTER_ENEMY_DESTROYED', 'BEFORE_CONSOLIDATE', 'AFTER_TARGET_SELECTED', 'AFTER_HIT_ROLL', 'AFTER_WOUND_ROLL', 'AFTER_DAMAGE_ROLL', 'AFTER_UNIT_SHOT', 'AFTER_CHARGE_MOVE', 'AFTER_UNIT_FOUGHT', 'AFTER_BATTLE_SHOCK_FAILED'];
 export function validateFlowState(s: GameState) {
   for (const p of s.players) if ((p.commandPoints !== undefined && !integer(p.commandPoints)) || (p.extraCpGainedThisBattleRound !== undefined && !integer(p.extraCpGainedThisBattleRound))) fail();
   for (const u of s.units) {
@@ -24,6 +24,7 @@ export function validateFlowState(s: GameState) {
     (f.boundary !== 'NONE' && (f.commandStep || f.pending.length)) || (!f.window && f.queuedWindows.length)) fail();
   if (f.started && s.phase === 'Command' && f.commandStep === null && !s.events.some(e => e.type === 'flow' && e.name === 'COMMAND_STEP_COMPLETED' && e.turn === s.turn && e.detail.step === 'END_OF_COMMAND_PHASE')) fail();
   if (!Array.isArray(f.resolvedAbilities) || new Set(f.resolvedAbilities).size !== f.resolvedAbilities.length || f.resolvedAbilities.some(id => typeof id !== 'string' || !id)) fail();
+  if (f.battleShockResolvedPhase && (f.battleShockResolvedPhase.phaseIndex !== f.phaseIndex || new Set(f.battleShockResolvedPhase.unitIds).size !== f.battleShockResolvedPhase.unitIds.length || f.battleShockResolvedPhase.unitIds.some(id => !unit(id)))) fail();
   if (new Set(f.pending.map(p => p.id)).size !== f.pending.length) fail();
   for (const p of f.pending) {
     if (!p.id || !p.label || !['BATTLE_SHOCK', 'ABILITY', 'MISSION_HOOK', 'RULE'].includes(p.kind) || (p.unitId && !unit(p.unitId))) fail();
@@ -36,12 +37,13 @@ export function validateFlowState(s: GameState) {
     (w.unitId && !unit(w.unitId)) || (w.targetUnitId && !unit(w.targetUnitId)) || w.passedPlayerIds.length >= 2 || new Set(w.passedPlayerIds).size !== w.passedPlayerIds.length || w.passedPlayerIds.some(id => !player(id))) fail();
   if (new Set(f.effects.map(e => e.id)).size !== f.effects.length) fail();
   for (const e of f.effects) {
-    if (!/^effect-\d+$/.test(e.id) || Number(e.id.slice(7)) < 1 || Number(e.id.slice(7)) >= f.nextEffectId || !e.source || !unit(e.target.unitId) || !player(e.expiryPlayerId) || typeof e.active !== 'boolean' ||
+    if (!/^effect-\d+$/.test(e.id) || Number(e.id.slice(7)) < 1 || Number(e.id.slice(7)) >= f.nextEffectId || !e.source || !unit(e.target.unitId) ||
+      (e.target.modelId && !s.units.find(u=>u.id===e.target.unitId)?.models.some(m=>m.id===e.target.modelId)) || !player(e.expiryPlayerId) || typeof e.active !== 'boolean' ||
       !integer(e.createdAt.turn, 1) || e.createdAt.turn > s.turn || !integer(e.createdAt.round, 1) || e.createdAt.round > s.round || !integer(e.createdAt.phaseIndex, 1) || e.createdAt.phaseIndex > f.phaseIndex || !player(e.createdAt.playerId) || !PHASES.includes(e.createdAt.phase) ||
       !['STACK', 'REPLACE_SAME_SOURCE', 'NON_STACKING', 'HIGHEST_ONLY'].includes(e.stacking) ||
-      !['END_OF_CURRENT_PHASE', 'END_OF_CURRENT_TURN', 'END_OF_BATTLE_ROUND', 'START_OF_NEXT_COMMAND_PHASE', 'END_OF_NEXT_COMMAND_PHASE', 'UNTIL_EXPLICITLY_REMOVED'].includes(e.expiry)) fail();
+      !['END_OF_CURRENT_PHASE', 'END_OF_CURRENT_TURN', 'END_OF_BATTLE_ROUND', 'START_OF_NEXT_COMMAND_PHASE', 'END_OF_NEXT_COMMAND_PHASE', 'START_OF_NEXT_SHOOTING_PHASE', 'UNTIL_EXPLICITLY_REMOVED'].includes(e.expiry)) fail();
     if (e.payload.kind === 'MODIFIER') {
-      if (!['MOVE', 'BS', 'WS', 'SAVE', 'LEADERSHIP', 'OC', 'HIT_ROLL', 'WOUND_ROLL', 'ATTACKS', 'DAMAGE', 'AP', 'STRENGTH'].includes(e.payload.characteristic) || !Number.isFinite(e.payload.value)) fail();
+      if (!['MOVE', 'CHARGE_ROLL', 'BS', 'WS', 'SAVE', 'LEADERSHIP', 'OC', 'HIT_ROLL', 'WOUND_ROLL', 'ATTACKS', 'DAMAGE', 'AP', 'STRENGTH'].includes(e.payload.characteristic) || !Number.isFinite(e.payload.value)) fail();
     } else if (e.payload.kind !== 'FLAG' || !e.payload.flag || typeof e.payload.value !== 'boolean') fail();
   }
   for (const u of f.usage) if (!u.stratagemId || !player(u.playerId) || !u.targetIds.length || new Set(u.targetIds).size !== u.targetIds.length || u.targetIds.some(id => !unit(id)) || !integer(u.phaseIndex, 1) || u.phaseIndex > f.phaseIndex || !integer(u.turn, 1) || u.turn > s.turn || !integer(u.round, 1) || u.round > s.round) fail();

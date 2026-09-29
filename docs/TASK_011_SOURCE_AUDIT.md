@@ -1,0 +1,96 @@
+# Task 011 source audit — 29 September 2026
+
+Task 011 implements the selected faction vertical slice on PR #11. `verifiedEntries.ts` records the chosen roster prices; `factionDatasheets.ts` provides 19 runtime definitions, and the deterministic preset creator builds a match ready for Deployment. Both presets pass content registry validation.
+
+## Source priority
+
+1. The [official 11th-edition Core Rules](https://assets.warhammer-community.com/eng_01-06_warhammer40k_new40k_core_rules-was6fbu1ix-hfewhmxyiy.pdf) and newer [Aeldari faction-pack errata](https://assets.warhammer-community.com/eng_09-06_warhammer40000_faction_pack_aeldari-glkjirbhiw-9udkry7xbr.pdf) / [Emperor's Children faction-pack errata](https://assets.warhammer-community.com/eng_10-06_warhammer40000_faction_pack_emperor_s_children-fffbpc3gn0-mesp5k6khu.pdf) take precedence. The public packs supplement rather than reproduce the complete Codex.
+2. The [Aeldari](https://wahapedia.ru/wh40k11ed/factions/aeldari/datasheets.html) and [Emperor's Children](https://wahapedia.ru/wh40k11ed/factions/emperor-s-children/datasheets.html) 11th-edition datasheet mirrors supply the selected Codex profiles, weapons, unit sizes and current faction-pack errata (Aeldari v1.3 and Emperor's Children v1.2 as of this snapshot). Conscript, 40k.app and Lexmechanic cross-check detachment wording. [New Recruit's 11e catalogue](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/) cross-checks prices and roster composition. Never use a `/wh40k10ed/` page to infer these rules. Direct datasheet URLs live in `verifiedEntries.ts`.
+3. The [official Munitorum Field Manual download site](https://mfm.warhammer-community.com/en/) reports an update dated 2 September 2026. Its interactive point listings returned HTTP 403 in this environment, so the point amounts below are currently derived from the secondary 11e catalogue; they are not claimed as a direct MFM verification. Do not substitute a 10th-edition listing.
+
+## Fixed roster sizes and sourced costs
+
+The updated 11e catalogue prices changed the earlier calculation: Farseer 65, Warlock 40, Autarch 75, Storm Guardians with platform 100, **10 Dire Avengers 140**, Fire Dragons 120, Dark Reapers 95, Rangers 60, Wave Serpent 115 and Night Spinner 170 total **980**. The 10-point Breath of Vaul brings the selected preset to **990**. The earlier 935-point variant with five Avengers remains a valid fallback if a later points update requires it; do not silently mix prices from different snapshots.
+
+The updated Emperor's Children total is Lord Exultant 90, Sorcerer 55, Lord Kakophonist 70, 10 Infractors 160, Tormentors 80, Noise Marines 145, Flawless Blades 95, Rhino 70 and Land Raider 220: **985**. [Faultless Opportunist](https://wahapedia.ru/wh40k11ed/factions/emperor-s-children/) costs 15, resulting in an exact **1,000-point** preset. Its Heroic Intervention cost and extra-use interaction now run through generic Stratagem policies.
+
+`VERIFIED_MUSTER_PLANS` records attachments and transport passengers: Wave Serpent Fire Dragons plus Rangers (10/12); Rhino Lord Exultant with Infractors (11/12); Land Raider Sorcerer with Tormentors plus three double-space Flawless Blades (12/14). `createAeldariVsEmperorsChildrenMatch(seed)` currently executes Task 008's attachment and transport validations for this deployment fixture. Both presets now pass registry validation against executable ability registrations.
+
+The Farseer Eldritch Storm now rolls D3 damage; Farseer and Warlock Witchblades use Anti-Infantry 2+. Fire Dragons' Assured Destruction now grants optional Hit, Wound and Damage reroll permissions against Monster/Vehicle targets through a temporary weapon view, checked before dice and persisted in a paused attack snapshot. Guardian flamers now include their Assault and Ignores Cover abilities. Chosen equipment and keyword checks cover all 19 definitions; additional timing and interaction checks remain ongoing.
+
+Warlock Runes of Fortune now reduces a charge's rolled allowance by 2 when at least one selected target has the ability. The target preview, final formation check, and snapshot validation all apply the same post-roll adjustment once; the event retains the original 2D6 result. The existing Into the Fray maximum is applied after this adjustment.
+
+Rangers have a ranged-only invulnerable save, represented separately from their normal save and applied only while resolving ranged attacks. The Wave Serpent's twin shuriken cannon now carries Twin-linked. These additions preserve existing Task 009 saves and source datasheets.
+
+The selected Emperor's Children Lord Exultant default loadout now includes its close combat weapon; Sorcerer witchfire and force weapon damage are D3. The selected leaders carry the relevant generic GRENADES, CHAOS and SLAANESH keywords. Unselected alternative equipment is outside this vertical slice.
+
+Lord Exultant's Perfectionists and Lord Kakophonist's Obsessive Annunciation now contribute Lethal Hits and ranged Sustained Hits 1 respectively through the same source-aware AttackContext used by other attached-unit rules. Tests resolve critical attacks and verify the effect disappears when its leader is no longer alive.
+
+Farseer Guide now selects a visible enemy within 18 inches at the end of the Movement phase. A temporary effect marks the target until the start of the Aeldari player's next Command phase; the common Hit resolution grants +1 only to friendly Aeldari attacks against that target, without editing weapons or enemy datasheets.
+
+`content/registry.ts` now constructs an actual lookup for both factions, both presets, the selected weapons, the twelve Stratagem definitions, and only those datasheet ability IDs with real engine integration. `validatePresetRoster` passes for both presets; the registry rejects unresolved references rather than using empty or no-op resolvers.
+
+Sorcerer's Warped Interference now grants Cover to its attached unit through the existing terrain shooting modifier, even in clear terrain; the bonus disappears when its bearer is destroyed. The usual Ignores Cover permission remains authoritative.
+
+Night Spinner's Monofilament Web and Sorcerer's Wracking Agonies now share a post-shot effect hook. A hit with the specified weapon slows an eligible surviving target by 2 inches and reduces its charge roll by 2 until the attacker's next turn; Wracking Agonies requires Infantry. Attack snapshots, movement characteristics, and charge target previews use the same serializable effect data.
+
+Wave Serpent Shield now supplies a ranged-only wound-roll penalty when the attacking Strength exceeds the vehicle's Toughness. The shared combat pipeline resolves the modifier without changing either weapon profile. Wave Serpent, Night Spinner and Chaos Land Raider each use their datasheet Damaged threshold to penalize their own Hit rolls while their bearer is alive. Tests cover threshold boundaries, melee exclusion, and unchanged weapon data.
+
+Storm Guardians now retain a model-profile role through initialization and snapshots. Their Serpent Shield grants an invulnerable save while the platform lives, and the existing shared damage pipeline removes that platform when the last Guardian dies (including mortal wounds). This role remains associated with the original models inside an Attached unit.
+
+Dark Reapers' Inescapable Accuracy uses optional, source-specific choices for BS and Hit modifiers in the shared ranged attack resolution. The selected modifiers are omitted from that attack only; other units and the selected weapon remain unchanged. Unsupported choices are rejected before an engine attack.
+
+The Chaos Land Raider carries two individually selectable soulshatter lascannons with identical 11e profiles. Distinct runtime weapon IDs let the existing Shooting controller pick a target for each weapon independently.
+
+Stormblades and Objective Defiled now share an end-of-Command resolver that delegates secured objective state and phase-end loss to the mission controller. Attached units preserve the original source; a surviving Character cannot trigger Stormblades after the last Guardian has died. Psychic Communion records the capped number of other nearby on-board Aeldari Psykers when the Warlock's unit is selected to shoot, then applies the frozen bonus only to its Destructor attack view; the catalogue stays unchanged.
+
+Excessive Assault adds a wound reroll permission to Infractors' melee attack views: wound ones are eligible by default, while any result is selectable if the target is in range of an objective. Lord Host grants Scouts 6 and Infiltrators to its bearer within an Emperor's Children Battleline attachment; Task 006 then requires every model in that Attached unit to have the relevant core ability. Neither ability edits the underlying datasheet.
+
+Euphoric Strikes is an explicit start-of-Fight command, limited to one use per battle. The effect engine now supports optional model-scoped targets so its Attacks and AP modifiers apply to the Lord Exultant bearer only, expire after the phase, and remain marked as used in a snapshot.
+
+Terrifying Crescendo queries the last Shooting action's actual successful hits and lets its player select one surviving enemy unit during the post-shot timing window. A serializable Leadership penalty then affects Leadership and Battle-shock tests until the beginning of that player's next Shooting phase. This introduced a generic Shooting-phase expiry point without modifying Match Flow for a specific datasheet.
+
+Doom Siren reuses that post-shot hit history for an Infantry-only selection. Its optional engine command rolls three injected D6, resolves mortal wounds through the central damage handler, then calls the existing Battle-shock resolver only when wounds were actually lost. Invalid targets never consume random values; usage and rolls are recorded in the event log.
+
+Path of Command is an explicit option of the generic Stratagem command. It checks that a targeted friendly unit still contains an Autarch with the ability, discounts only the chosen usage by one CP (minimum zero), and records one army-wide use for that Battle Round in serializable Stratagem usage history. Core/reaction cost policies remain intact.
+
+## Verified mechanics integrated
+
+- [Battle Focus / Agile Manoeuvres](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/517a-dad5-0e75-8a13/battle-focus---agile-manoeuvres) names six triggers: Swift as the Wind, Flitting Shadows, Star Engines, Sudden Strike, Opportunity Seized and Fade Back. The army rule grants 2/4/6 tokens at the start of a round for Incursion/Strike Force/Onslaught, with normal once-per-phase restrictions and round expiry.
+- [Guardian Battlehost](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/aeldari---aeldari-library/9805-eaee-0a84-f86f/guardian-battlehost) is Take and Hold, 2 DP. Its attack bonus checks the relevant model's keyword and whether its own unit or target is in objective range. The catalogue detachment entry does **not** contain all six stratagem definitions.
+- [Peerless Bladesmen](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/chaos---emperor%27s-children/faf3-053d-d290-a3d9/peerless-bladesmen) is Priority Assets, 2 DP. On selecting a charging unit to fight, the player chooses between Lethal Hits and Sustained Hits 1 on its melee weapons. The catalogue detachment entry does **not** contain all six stratagem definitions.
+- [Aspect Shrine Token](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/aeldari---aeldari-library/344f-a1d4-6038-7ee7/aspect-shrine-token) can replace a non-Character model's Hit or Wound result with an unmodified six once per token; one token per five models.
+- [Wave Serpent](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/xenos---aeldari/c302-5769-871e-853b/wave-serpent) carries 12 Asuryani Infantry with Wraith Construct costing two spaces; [Chaos Land Raider](https://www.newrecruit.eu/wiki/wh40k-11e/warhammer-40%2C000-11th-edition/chaos---emperor%27s-children/ff50-aaa8-e1f0-0dbc/chaos-land-raider) carries 14 Emperor's Children Infantry with Terminators and Flawless Blades costing two spaces. Check the official faction-pack errata before encoding either capacity.
+
+The Guardian Battlehost objective Hit modifier checks the attacking model's original keywords. All twelve Stratagem definitions, their effect consumers, timing and CP have been audited with the integrations below.
+
+Incremental update: attached Autarchs can explicitly reroll Advance and the D6 Agile Manoeuvre rolls through the shared die resolver; Rangers can take the 11e Path of the Outcast D6 reaction after an enemy finishes a move within 8 inches, using the existing reaction movement transaction. Flawless Blades can opt into Daemonic Patrons upon Fight selection: the shared melee resolver treats natural Wound rolls of 3+ as critical, and the end-of-Fight transition destroys one friendly model if their attacks destroyed no enemy model. An attached, living Farseer now offers Branching Fates once per phase on the serializable Hit, Wound or Damage roll checkpoint; the Damage pause occurs before any wounds are applied. Both chosen presets pass `validatePresetRoster`.
+
+Vaul's Vengeance now opens after a Guardian or Dire Avenger is destroyed by completed enemy attacks. An eligible War Walkers unit can spend CP to begin a locked, out-of-phase Shooting transaction against that attacker. Each profile uses the common visibility, target validation, modifiers, attack resolution and Hazardous handler. The completed reaction records ranged attack history and offers a read-only query for debug controls. The simple reaction currently resolves its weapon as one uninterrupted attack job; it does not open the mid-roll pause windows of normal Shooting. This remains a limitation for combinations with roll-triggered reactions. The debug UI offers the faction scenario, reaction controls and contextual faction commands, including melee target commitment before the reaction window.
+
+## 29 September 2026 continuation
+
+All 19 selected definitions now retain the checked chosen weapon profiles and model-count allocations. The source keywords missing from the initial implementation were added to several Emperor's Children infantry and transports and to the Aeldari vehicles. The Tormentor Obsessionist's selected bolt pistol now carries Precision. Vehicle hulls marked “Use model” in the source remain represented by circular prototype bases; exact hull collision remains outside this slice.
+
+Six Agile edge-case tests and four Fight-on-Death attached-unit tests now exercise cancellation, setup/ingress, Overrun, source-owned weapons and deferred splitting. A generic DURING_PHASE window was added for “any time during phase” Stratagem timing, with snapshot validation. This is an explicit player action between transactions, not an automatic interruption inside an attack job. The mid-roll Vaul reaction limitation remains documented above.
+
+## Final faction Stratagem and debug audit
+
+| Stratagem | Cost / timing | Effect and validation evidence |
+| --- | --- | --- |
+| Warding Salvoes | 1 CP; own Shooting or either Fight, before selection | Target Guardians or Dire Avengers; rerolls failed Wounds against models on an objective through `AttackPipeline`; attack test in `factionFinalAudit`. |
+| Shield Nodes | 1 CP; opponent Shooting or either Fight, after target selected | Objective range and selected target enforced; defender's actual Wound roll gets −1 through the shared pipeline, expires end phase; outside objective rejected and snapshot round-trip tested. |
+| Vaul's Vengeance | 1 CP; opponent Shooting or either Fight, after Guardian/Dire Avenger destroyed; once per round | War Walkers reaction targets only the responsible enemy; locked out-of-phase Shooting uses regular resolution. `factionStratagems` regression tests cover CP, target and snapshot. |
+| Time to Strike | 1 CP; own Movement, before Storm Guardians move | Fixed Advance +6 without die; Shooting and Charge after Advance enabled until end turn; normal movement and Charge validators used. |
+| Blades of Asuryan | 1 CP; own Shooting before selection | Guardian/Dire Avenger ranged weapons gain Pistol until end phase; an engaged Shooting attack succeeds without editing weapon data. |
+| Cost of Victory | 1 CP; end opponent Fight | Nonengaged Guardians go to Strategic Reserves; destroyed Guardian models return, attached Leader/Support models stay dead. |
+| Deft Parry | 1 CP; either Fight after enemy chooses defender | Selected Emperor's Children unit imposes −1 Hit through melee `AttackPipeline`; 1 CP, immutable weapons and snapshot tested. |
+| Death Ecstasy | 2 CP; either Fight after enemy chooses defender | Fight on Death resolves after attacker completes, including original attached component weapons; pending snapshot and 2 CP test. |
+| Incessant Violence | 1 CP; either Fight before Consolidation | Existing Consolidation transaction permits 6 inches and requires final enemy engagement; `factionStratagems` tests validate transaction and snapshot. |
+| Cruel Bladesman | 1 CP; either Fight before charged unit fights | Shared Save pipeline uses melee AP improved by one; comparison to baseline and immutable weapon tested. |
+| Terrifying Spectacle | 1 CP; opponent Command | Previous-turn Charge and Fight-phase kill checked; enemies within 6 inches roll, Below Half-strength gets −1; per-phase resolved marker prevents later duplicate Battle-shock and survives snapshot. |
+| Cut Down the Weak | 2 CP; opponent Movement after Fall Back | Within 6 inches, non-Walker Vehicles ineligible; reaction Charge must target the fallen-back unit and cannot grant charge Fights First. `factionStratagems` tests cover irreversibility, cost and snapshot. |
+
+`GameEngine.getFactionDebugOptions()` is a read-only source of contextual IDs for Euphoric Strikes, Exquisite Swordsmanship, Daemonic Patrons, Doom Siren and Terrifying Crescendo. The debug controls forward their selected IDs to engine commands; they do not mutate rules state. The Fight panel also selects melee targets and resolves Fight on Death through existing commands. Tests verify post-shot targets are living, actually hit units from the current match. Battle Focus and Stratagem buttons continue using the existing engine APIs.
+
+**Known limitation:** Vaul's Vengeance reaction Shooting does not expose nested mid-roll reaction pauses. It still resolves Hit, Wound, Save, Damage and casualties through the shared pipeline and does not prevent this vertical slice. Generalized nested reactions can follow in a later task.

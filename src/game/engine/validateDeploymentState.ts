@@ -43,7 +43,7 @@ export function validateDeploymentState(s: GameState): void {
     }
     if (d.stage === 'PRE_BATTLE_RULES' || d.stage === 'BATTLE_STARTED') require(d.firstTurnPlayerId && !pendingDeployment(s).length, 'unfinished deployment');
   }
-  require([s.setup, s.scout, s.movement, s.shooting, s.closeCombat?.move ?? s.closeCombat?.charge ?? s.closeCombat?.fight?.selected].filter(Boolean).length <= 1, 'overlapping transactions');
+  require([s.setup, s.scout, s.movement, s.shooting, s.reactionMove, s.closeCombat?.move ?? s.closeCombat?.charge ?? s.closeCombat?.fight?.selected].filter(Boolean).length <= 1, 'overlapping transactions');
   if (s.setup) {
     const tx = s.setup, u = unit(tx.unitId);
     require(u && !onBattlefield(u) && u.models.some(m => m.alive), 'setup source');

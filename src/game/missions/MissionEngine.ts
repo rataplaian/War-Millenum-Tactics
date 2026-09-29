@@ -101,8 +101,11 @@ export function recordDestroyedUnits(before: GameState, after: GameState) {
   const survivors = new Set(after.units.flatMap(u => u.models.filter(m => m.alive).map(m => m.id)));
   for (const unit of before.units) {
     const living = unit.models.filter(m => m.alive);
-    if (living.length && living.every(m => !survivors.has(m.id)))
-      flowEvent(after, 'UNIT_DESTROYED', { targetUnitId: unit.id, targetPlayerId: unit.playerId }, unit.id, unit.playerId);
+    if (living.length && living.every(m => !survivors.has(m.id))) {
+      const attacker=[...after.events.slice(before.events.length)].reverse().find(e=>e.type==='melee-attack-resolved' && e.resolution.targetUnitId===unit.id);
+      flowEvent(after, 'UNIT_DESTROYED', { targetUnitId: unit.id, targetPlayerId: unit.playerId,
+        ...(attacker ? {attackerUnitId:attacker.unitId} : {}) }, unit.id, unit.playerId);
+    }
   }
 }
 function recordProgress(s: GameState, e: GameEvent) {

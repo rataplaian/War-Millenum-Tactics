@@ -12,9 +12,11 @@ export function validateTransportState(s: GameState): void {
       check(positive(t.maximumModels) && d.modelCount === 1 && Array.isArray(t.allowedKeywords) && Array.isArray(t.excludedKeywords), 'capacity');
       check(t.firingDeck === undefined || (Number.isSafeInteger(t.firingDeck) && t.firingDeck >= 0), 'deck capacity');
       check(!t.modelCosts || t.modelCosts.every(c => positive(c.cost) && c.keywords.length), 'model cost');
+      check((t.afterAdvance === undefined || t.afterAdvance === 'SHOCK') && (t.afterNormalMove === undefined || t.afterNormalMove === 'ASSAULT'), 'disembark permission');
     }
     if (d.attachment) check(['LEADER', 'SUPPORT'].includes(d.attachment.role) && d.attachment.canLeadDatasheetIds.every(id => s.definitions.some(x => x.id === id && !x.attachment)), 'attachment compatibility');
     check(d.invulnerableSave === undefined || (Number.isInteger(d.invulnerableSave) && d.invulnerableSave >= 2 && d.invulnerableSave <= 7), 'invulnerable save');
+    check(d.invulnerableSaveRanged === undefined || (Number.isInteger(d.invulnerableSaveRanged) && d.invulnerableSaveRanged >= 2 && d.invulnerableSaveRanged <= 7), 'ranged invulnerable save');
   }
   for (const u of s.units) {
     if (u.location === 'EMBARKED') {
@@ -46,7 +48,7 @@ export function validateTransportState(s: GameState): void {
   if (ts.tacticalFollowUp) check(s.phase === 'Movement' && s.units.some(u => u.id === ts.tacticalFollowUp && u.location === 'BATTLEFIELD' && u.playerId === s.activePlayerId), 'tactical follow-up');
   if (ts.disembark) {
     const tx = ts.disembark, u = s.units.find(u => u.id === tx.unitId);
-    check(u && u.location === 'EMBARKED' && u.embarked?.transportId === tx.transportId && ['TACTICAL', 'RAPID', 'COMBAT', 'EMERGENCY'].includes(tx.mode), 'transaction');
+    check(u && u.location === 'EMBARKED' && u.embarked?.transportId === tx.transportId && ['TACTICAL', 'RAPID', 'COMBAT', 'EMERGENCY', 'SHOCK', 'ASSAULT'].includes(tx.mode), 'transaction');
     check(Object.entries(tx.positions).every(([id, p]) => u!.models.some(m => m.id === id && m.alive) && isFinitePosition(p)), 'candidate positions');
     check(!['COMBAT', 'EMERGENCY'].includes(tx.mode) || !!tx.hazard, 'missing hazard');
   }

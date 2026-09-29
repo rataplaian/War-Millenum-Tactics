@@ -19,6 +19,7 @@ import { BattlefieldView, PLAYER_COLORS } from './BattlefieldView';
 import { ShootingPanel } from './ShootingPanel';
 import { BattleLog } from './BattleLog';
 import { createSeededRng, type RandomSource } from '../game/utils/dice';
+import { createAeldariVsEmperorsChildrenMatch } from '../game/content/presets';
 const MESSAGES: Partial<Record<FailureReason, string>> = {
   MATCH_FINISHED: 'The match has finished.', WRONG_PHASE: 'This action is not available in the current phase.',
   UNIT_NOT_FOUND: 'Unit not found.', NOT_YOUR_UNIT: 'Select a unit belonging to the active player.',
@@ -43,7 +44,7 @@ export function GameScreen() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [target, setTarget] = useState<{ position: Position; legal: boolean } | null>(null);
   const [message, setMessage] = useState('');
-  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT' | 'TRANSPORTS' | 'MISSION'>('DEPLOYMENT');
+  const [scenario, setScenario] = useState<TerrainScenario | 'DEPLOYMENT' | 'TRANSPORTS' | 'MISSION' | 'FACTIONS'>('FACTIONS');
   const [observerId, setObserverId] = useState<string | null>('unit-1:model:1');
   const [targetZ, setTargetZ] = useState(0);
   function report(result: CommandResult<unknown>, success: string) {
@@ -52,11 +53,11 @@ export function GameScreen() {
   }
   function start() {
     setSelectedModelId(null); setTarget(null); setTargetZ(0);
-    engine.current = GameEngine.create(scenario === 'MISSION' ? createProvingGroundMatch() : scenario === 'TRANSPORTS' ? createTransportTestMatch() : scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
+    engine.current = GameEngine.create(scenario === 'FACTIONS' ? createAeldariVsEmperorsChildrenMatch(42) : scenario === 'MISSION' ? createProvingGroundMatch() : scenario === 'TRANSPORTS' ? createTransportTestMatch() : scenario === 'DEPLOYMENT' ? createDeploymentTestMatch() : createTerrainTestMatch(scenario));
     if (scenario === 'TRANSPORTS') engine.current.configureAttachments([{ id: 'attached', bodyguardId: 'bodyguard', leaderIds: ['leader'], supportIds: ['support'] }]);
     rng.current = createSeededRng(42);
     if (scenario === 'MISSION') engine.current.setupMission(PROVING_GROUND, 'player-1', {}, rng.current);
-    else engine.current.enableMatchFlow(); // Explicit repeatable debug stream; no platform randomness.
+    else if (scenario !== 'FACTIONS') engine.current.enableMatchFlow(); // Preset already includes flow.
     setState(engine.current.getState());
     setMessage('Advance to Movement, select a unit, then a model and destination.');
   }
@@ -70,6 +71,10 @@ export function GameScreen() {
     if (current.closeCombat?.move) {
       if (current.closeCombat.move.unitId !== unitId) { setMessage('Select a model from the moving unit.'); return; }
       setSelectedModelId(modelId); setTarget(null); return;
+    }
+    if(current.reactionMove){
+      if(current.reactionMove.unitId!==unitId){setMessage('Select a model from the reacting unit.');return;}
+      setSelectedModelId(modelId);setTarget(null);return;
     }
     if (!current.movement) {
       const result = engine.current!.beginMovement(unitId);
@@ -87,6 +92,10 @@ export function GameScreen() {
       const result = engine.current!.moveCombatModel(selectedModelId, position);
       setTarget({ position, legal: result.ok }); report(result, 'Position accepted. Complete movement to validate the final formation.'); return;
     }
+    if(engine.current!.getState().reactionMove){
+      const result=engine.current!.moveReactionModel(selectedModelId,position);
+      setTarget({position,legal:result.ok});report(result,'Reaction position accepted.');return;
+    }
     const result = engine.current!.moveModel(selectedModelId, position);
     setTarget({ position, legal: result.ok });
     report(result, result.ok ? `Legal move: ${result.value.distance.toFixed(2)}″. Remaining: ${result.value.remaining.toFixed(2)}″.` : '');
@@ -98,7 +107,7 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
-    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['MISSION', 'TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
+    {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['FACTIONS', 'MISSION', 'TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>
       <Text style={styles.text}>Battlefield: {state.battlefield.width}″ × {state.battlefield.height}″</Text>
@@ -108,7 +117,8 @@ export function GameScreen() {
       <CommandPanel state={state} engine={engine.current!} rng={rng.current!} report={report} />
       <MissionPanel state={state} engine={engine.current!} report={report} />
       {state.phase === 'Shooting' && <Text style={styles.note}>Choose shooter, weapon and target using the shooting controls below.</Text>}
-      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move) move(position); }} />
+      <BattlefieldView state={state} selectedModelId={selectedModelId} target={target} onModel={(unitId, modelId) => { if (state.phase === 'Movement' || state.closeCombat?.move || state.reactionMove) chooseModel(unitId, modelId); }} onTarget={position => { if (state.phase === 'Movement' || state.closeCombat?.move || state.reactionMove) move(position); }} />
+      {state.reactionMove && <Button title="COMPLETE REACTION MOVE" onPress={()=>report(engine.current!.completeReactionMove(),'Reaction move completed.')} />}
       <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text>
       <TerrainDebugPanel state={state} engine={engine.current!} observerId={observerId} onObserver={setObserverId} targetZ={targetZ} onTargetZ={setTargetZ} onDestination={move} />
       {state.units.filter(onBattlefield).map(unit => {
@@ -118,9 +128,15 @@ export function GameScreen() {
           <Text style={[styles.unit, { color: PLAYER_COLORS[playerIndex] }]}>{definition.name} · P{playerIndex + 1}</Text>
           <Text style={styles.text}>Move {definition.stats.movement}″ · {unit.state.hasMoved ? 'Completed' : 'Available'}</Text>
           <Text style={styles.text}>Alive: {unit.models.filter(m => m.alive).length}/{unit.models.length} · Wounds: {unit.models.map(m => m.woundsRemaining).join(" / ")}</Text>
-          <Text style={styles.note}>PLACEHOLDER DATA</Text>
+          {scenario !== 'FACTIONS' && <Text style={styles.note}>PLACEHOLDER DATA</Text>}
           <Button title="SELECT UNIT" onPress={() => chooseUnit(unit.id)}
             disabled={state.phase !== 'Movement' || unit.playerId !== state.activePlayerId || unit.state.hasMoved || !!state.movement} />
+          {state.phase==='Movement' && <Button title="BEGIN ADVANCE" disabled={unit.playerId!==state.activePlayerId || unit.state.hasMoved || !!state.movement} onPress={()=>report(engine.current!.beginMovement(unit.id,'ADVANCE_MOVE',rng.current!),'Advance rolled. Select a model and destination.')} />}
+          {state.battleFocus && state.phase==='Movement' && unit.playerId===state.activePlayerId && <View style={{gap:4}}>
+            <Button title="BATTLE FOCUS · SWIFT AS THE WIND" onPress={()=>report(engine.current!.useAgileManoeuvre('SWIFT_AS_THE_WIND',unit.id,'MOVE','NORMAL_MOVE'),'Swift as the Wind used.')} />
+            <Button title="BATTLE FOCUS · FLITTING SHADOWS" onPress={()=>report(engine.current!.useAgileManoeuvre('FLITTING_SHADOWS',unit.id,'MOVE','NORMAL_MOVE'),'Flitting Shadows used.')} />
+            <Button title="BATTLE FOCUS · STAR ENGINES" onPress={()=>report(engine.current!.useAgileManoeuvre('STAR_ENGINES',unit.id,'MOVE','ADVANCE_MOVE'),'Star Engines used.')} />
+          </View>}
           {state.movement?.unitId === unit.id && unit.models.filter(m => m.alive).map((model, i) =>
             <View key={model.id} style={{ gap: 4 }}>
               <Button title={`${selectedModelId === model.id ? 'SELECTED' : 'SELECT'} MODEL ${i + 1}`} onPress={() => chooseModel(unit.id, model.id)} />

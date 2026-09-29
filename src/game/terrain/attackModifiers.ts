@@ -1,7 +1,7 @@
 import { unitHasCore, hasWeaponAbility, resolvedAbilities } from '../abilities/registry';
 import type { AttackChoices } from '../abilities/types';
 import type { RangedWeapon } from '../models';
-import { sourceModifier } from '../attachments/queries';
+import { sourceAbilities, sourceModifier } from '../attachments/queries';
 import { modifierDelta } from '../effects/EffectEngine';
 import type { AttackModifier, GameState, Model, ModelAttackModifiers, Unit } from '../models';
 import type { VisibilityProvider } from './visibility';
@@ -10,7 +10,7 @@ import { areasForModel, baseDistance3, hasAnyKeyword, LIGHT_BODY, terrainRules }
 import { EPSILON } from '../utils/geometry';
 export function benefitOfCover(state: GameState, attacker: Model, target: Unit, provider: VisibilityProvider): boolean {
   const living = target.models.filter(m => m.alive);
-  return unitHasCore(state, target, 'STEALTH') || living.length > 0 && living.every(model =>
+  return unitHasCore(state, target, 'STEALTH') || sourceAbilities(state,target).some(x=>x.ability.id==='WARPED_INTERFERENCE') || living.length > 0 && living.every(model =>
     (hasAnyKeyword(state, model, LIGHT_BODY) && areasForModel(state, model).length > 0) || !provider.inspect(attacker, model).terrainFullyVisible);
 }
 export function plungingFire(state: GameState, attacker: Model, target: Unit, provider: VisibilityProvider): boolean {

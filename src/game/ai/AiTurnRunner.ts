@@ -45,16 +45,19 @@ export class AiTurnRunner {
     if(this.trace.length>this.maxSteps)throw new AiStallError(`AI step budget ${this.maxSteps} exceeded`,this.trace.slice(-30));
     if(trace.failure)throw new AiStallError(`${trace.failure} at ${trace.step} (${trace.phase})`,this.trace.slice(-30));
     const next=this.engine.getState();
-    const key=`${next.round}:${next.turn}:${next.phase}:${next.deployment?.stage}:${next.flow?.phaseIndex}:${next.flow?.commandStep}:${next.flow?.window?.id}:${next.movement?.unitId}:${next.shooting?.unitId}:${next.closeCombat?.fight?.step}:${next.closeCombat?.fight?.selected?.unitId}:${next.events.length}`;
+    const key=`${next.round}:${next.turn}:${next.phase}:${next.deployment?.stage}:${next.flow?.phaseIndex}:${next.flow?.commandStep}:${next.flow?.window?.id}:${next.movement?.unitId}:${next.shooting?.unitId}:${next.closeCombat?.fight?.step}:${next.closeCombat?.fight?.selected?.unitId}:${next.closeCombat?.fight?.pileInDone.join(',')}:${next.closeCombat?.fight?.consolidateDone.join(',')}:${next.closeCombat?.fight?.fought.join(',')}:${next.events.length}`;
     const count=(this.repeated.get(key)??0)+1;this.repeated.set(key,count);
     if(count>3)throw new AiStallError(`Repeated state ${key}`,this.trace.slice(-30));
     return trace;
   }
-  run() {
-    while(this.engine.getState().status==='in-progress')this.step();
+  run(onProgress?: (steps: number, round: number, phase: string) => void) {
+    while(this.engine.getState().status==='in-progress') {
+      this.step();
+      if(onProgress && this.trace.length%100===0) {const s=this.engine.getState();onProgress(this.trace.length,s.round,s.phase);}
+    }
     return {state:this.engine.getState(),steps:this.trace.length,trace:this.trace};
   }
 }
-export function runMatchToCompletion(seed:number) {
-  return new AiTurnRunner(new GameEngine(createAeldariVsEmperorsChildrenMatch(seed)),seed).run();
+export function runMatchToCompletion(seed:number, onProgress?: (steps: number, round: number, phase: string) => void) {
+  return new AiTurnRunner(new GameEngine(createAeldariVsEmperorsChildrenMatch(seed)),seed).run(onProgress);
 }

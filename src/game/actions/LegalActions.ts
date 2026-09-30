@@ -59,7 +59,7 @@ export function getLegalActions(engine: GameEngine, playerId: string, snapshot?:
     }
     return actions;
   }
-  if (s.deployment?.stage !== 'BATTLE_STARTED') {
+  if (s.deployment && s.deployment.stage !== 'BATTLE_STARTED') {
     if (s.setup) {
       if (s.units.find(u=>u.id===s.setup!.unitId)?.playerId!==playerId) return [];
       const unit=s.units.find(u=>u.id===s.setup!.unitId)!;
@@ -154,7 +154,7 @@ export function getLegalActions(engine: GameEngine, playerId: string, snapshot?:
     const tx=s.closeCombat.move,u=own.find(u=>u.id===tx!.unitId);
     if(!u)return [];
     for(const m of u.models.filter(m=>m.alive && !((tx.used[m.id]??0)>0.01))) for(const p of moveCandidates(s,u,m.id).slice(0,9))
-      if(engine.previewCombatMove(m.id,p).ok) actions.push({kind:'COMBAT_MOVE_MODEL',modelId:m.id,target:p});
+      if(Math.hypot(p.x-m.position.x,p.y-m.position.y)>0.01 && engine.previewCombatMove(m.id,p).ok) actions.push({kind:'COMBAT_MOVE_MODEL',modelId:m.id,target:p});
     if(probe(e=>e.completeCombatMove())) actions.push({kind:'COMPLETE_COMBAT_MOVE'});
     if(tx.kind==='charge') actions.push({kind:'FAIL_CHARGE'});
     return actions;
@@ -186,7 +186,7 @@ export function getLegalActions(engine: GameEngine, playerId: string, snapshot?:
       for(const a of debug?.actions??[]) if(a.eligibility?.ok) actions.push({kind:'START_ACTION',unitId:u.id,actionId:a.id,objectiveId:a.objectives[0]});
     }
   }
-  if(s.phase==='Charge' && playerId===s.activePlayerId && (s.battleFocus?.tokens[playerId]??0)>0) for(const u of own.filter(u=>u.location==='BATTLEFIELD'))
+  if(s.phase==='Charge' && playerId===s.activePlayerId) for(const u of own.filter(u=>u.location==='BATTLEFIELD'))
     if(probe(e=>e.declareCharge(u.id,()=>0.5))) actions.push({kind:'DECLARE_CHARGE',unitId:u.id});
   if(s.phase==='Charge' && playerId===s.activePlayerId) for(const u of own.filter(u=>u.location==='BATTLEFIELD'))
     if(probe(e=>e.useAgileManoeuvre('FLITTING_SHADOWS',u.id,'CHARGE'))) actions.push({kind:'AGILE_MANOEUVRE',id:'FLITTING_SHADOWS',unitId:u.id,trigger:'CHARGE'});

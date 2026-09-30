@@ -37,7 +37,11 @@ On the opening screen choose **PLAY**, choose your faction, then start a new mat
 
 The session runs the AI in small mobile-friendly batches and stops at human decisions. `runMatchToCompletion(seed)` runs a bounded, seeded AI-vs-AI match from pre-battle to result for regression testing. Its trace reports the phase, available action kinds, selected command, score and failure. Movement coordinates are continuous inches; every suggested location is previewed and committed through the engine. The AI is greedy and bounded, not an exhaustive tactical search. Existing snapshots remain GameState snapshots; no persistent save or real-device build is part of this prototype.
 
-Known limitation: Vaul's Vengeance reaction Shooting resolves its shared combat pipeline but does not expose nested mid-roll reaction pauses. Human action lists show at most 40 choices at once; select a unit/model to narrow them. Automatic transport placement is a bounded search and may return no legal formation in crowded terrain.
+Known limitation: Vaul's Vengeance reaction Shooting does not expose nested mid-roll reaction pauses. Hit/wound/save/damage/casualties still resolve. Human action lists show at most 40 choices at once; select a unit/model to narrow them. Automatic transport placement is a bounded search and may return no legal formation in crowded terrain.
+
+For a single observable AI simulation, run `node --import tsx progress012.mjs 42` (replace 42 with the seed). It reports progress every 100 decisions, duration, steps and result, validates the final snapshot and exits unsuccessfully with a recent trace on failure. The test suite also prints per-seed progress.
+
+Validation: **693 tests pass** (681 existing + 12 Task 012), including full matches for seeds 1, 2, 3, 42, 99 and two identical runs of seed 7. Each finishes within five rounds with a valid result, no open movement/shooting/setup transaction and a reloadable snapshot. App and isolated-engine TypeScript checks pass. Human/AI handoff and reaction ownership are checked for both factions.
 
 ## Task 011 faction vertical slice
 

@@ -4,7 +4,14 @@ import { GameEngine } from '../src/game/engine/GameEngine';
 import { createAeldariVsEmperorsChildrenMatch } from '../src/game/content/presets';
 import { getLegalActions, performAction } from '../src/game/actions/LegalActions';
 import { PlaySession } from '../src/game/session/PlaySession';
-import { runMatchToCompletion } from '../src/game/ai/AiTurnRunner';
+import { runMatchToCompletion as simulate } from '../src/game/ai/AiTurnRunner';
+
+function runMatchToCompletion(seed:number) {
+  const start=performance.now();console.log(`AI seed ${seed}: starting`);
+  const result=simulate(seed,(steps,round,phase)=>console.log(`AI seed ${seed}: ${steps} steps, round ${round}, ${phase}`));
+  console.log(`AI seed ${seed}: PASS ${result.steps} steps in ${((performance.now()-start)/1000).toFixed(2)}s`);
+  return result;
+}
 
 test('legal actions are serializable, detached and dispatched through GameEngine', () => {
   const engine=new GameEngine(createAeldariVsEmperorsChildrenMatch(9));

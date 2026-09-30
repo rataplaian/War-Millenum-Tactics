@@ -1,6 +1,6 @@
 # War Millennium Tactics
 
-Continuous tabletop movement and combat prototype for a local, single-player, turn-based tabletop tactical game for Android and iOS. The first prototype uses one **placeholder** Aeldari unit and one **placeholder** Emperor’s Children unit. All fixture statistics/equipment are invented test data, not official datasheets.
+Local, single-player tabletop tactics prototype for Android and iOS. The PLAY mode stages a Proving Ground match between preset Aeldari and Emperor’s Children forces against a deterministic Standard AI. Proving Ground is an invented technical mission; no backend or account is required.
 
 ## Stack
 
@@ -26,15 +26,22 @@ npm test
 npm run typecheck
 npm run typecheck:engine
 npm run check
-# Optional bundling check, not part of Task 010 validation:
 npm run export:mobile
 ```
 
 The mobile export checks bundling for Android and iOS; it does not build an APK/IPA or replace real-device testing. Build outputs and node_modules are ignored; commit package-lock.json and use npm ci for portable installs.
 
-## Current status: Task 011 faction vertical slice
+## Current status: Task 012 playable match
 
-Task 011 is implemented on its existing feature branch and PR #11. Its runtime contains 19 chosen 11th-edition unit definitions, mixed-model loadouts, two deterministic presets under the 1,000-point cap, and a Proving Ground match ready for deployment. Both presets pass registry validation. Battle Focus, Aspect Shrine tokens, Thrill Seekers, Exquisite Swordsmanship, transport permissions and faction Stratagem interactions use the existing generic controllers. The debug screen can launch the faction preset. Selected loadouts, the twelve faction Stratagem interactions and contextual debug controls have been audited. Vaul's Vengeance reaction Shooting does not expose nested mid-roll pauses; Hit, Wound, Save, Damage and casualties still resolve. See [Task 011 source audit](docs/TASK_011_SOURCE_AUDIT.md) and [architecture](docs/ARCHITECTURE.md).
+On the opening screen choose **PLAY**, choose your faction, then start a new match. The opponent uses the same GameEngine commands and legal-action queries as the human action panel. Tap a unit to filter choices; tap its model and a destination on the tabletop during an open movement transaction. The panel exposes deployment formations, Command steps, mission actions, Shooting, Charge and Fight commands, timing reactions, faction abilities, transport choices and result/VP. **DEBUG BATTLE** opens the older inspection interface.
+
+The session runs the AI in small mobile-friendly batches and stops at human decisions. `runMatchToCompletion(seed)` runs a bounded, seeded AI-vs-AI match from pre-battle to result for regression testing. Its trace reports the phase, available action kinds, selected command, score and failure. Movement coordinates are continuous inches; every suggested location is previewed and committed through the engine. The AI is greedy and bounded, not an exhaustive tactical search. Existing snapshots remain GameState snapshots; no persistent save or real-device build is part of this prototype.
+
+Known limitation: Vaul's Vengeance reaction Shooting resolves its shared combat pipeline but does not expose nested mid-roll reaction pauses. Human action lists show at most 40 choices at once; select a unit/model to narrow them. Automatic transport placement is a bounded search and may return no legal formation in crowded terrain.
+
+## Task 011 faction vertical slice
+
+Task 011 supplies 19 chosen 11th-edition unit definitions, mixed-model loadouts, two deterministic presets under the 1,000-point cap, and a Proving Ground match ready for deployment. Both presets pass registry validation. Battle Focus, Aspect Shrine tokens, Thrill Seekers, Exquisite Swordsmanship, transport permissions and faction Stratagem interactions use the existing generic controllers. See [Task 011 source audit](docs/TASK_011_SOURCE_AUDIT.md) and [architecture](docs/ARCHITECTURE.md).
 
 Implemented: immutable unit definitions separated from runtime instances, circular bases in millimetres, continuous tabletop coordinates in inches, configurable battlefield, endpoint collisions, per-model normal movement allowance, unit movement transactions with exact cancellation, configurable coherency/engagement queries and deterministic movement events. Task 001 dice and phase/turn progression remain supported.
 

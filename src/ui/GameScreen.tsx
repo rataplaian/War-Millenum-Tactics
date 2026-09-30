@@ -37,7 +37,7 @@ const MESSAGES: Partial<Record<FailureReason, string>> = {
   NO_ELIGIBLE_FIRING_MODELS: 'No models can fire at this target.', SHOOTING_ALREADY_RESOLVED: 'Dice have been rolled; shooting cannot be cancelled.',
   INCOHERENT: 'The final formation is not coherent. Reposition models or cancel.',
 };
-export function GameScreen() {
+export function GameScreen({onExit}:{onExit?:()=>void}={}) {
   const engine = useRef<GameEngine | null>(null);
   const rng = useRef<RandomSource | null>(null);
   const [state, setState] = useState<GameState | null>(null);
@@ -107,6 +107,7 @@ export function GameScreen() {
   }
   return <SafeAreaView style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.content}>
     <Text accessibilityRole="header" style={styles.title}>WAR MILLENNIUM TACTICS</Text>
+    {onExit&&<Button title="BACK TO MAIN MENU" onPress={onExit}/>}
     {!state ? <><Text style={styles.text}>Local prototype · Command, CP and timing</Text><Text style={styles.text}>Scenario: {scenario}</Text>{(['FACTIONS', 'MISSION', 'TRANSPORTS', 'DEPLOYMENT', ...TERRAIN_SCENARIOS] as const).map(name => <Button key={name} title={name} onPress={() => setScenario(name)} />)}<Button title="START TEST BATTLE" onPress={start} /></> : <>
       <Text style={styles.text}>Round {state.round} · Turn {state.turn} · {state.phase}</Text>
       <Text style={styles.text}>Active player: {state.players.find(p => p.id === state.activePlayerId)?.name}</Text>

@@ -1,5 +1,6 @@
 import type { GameState } from '../models';
 import { scoreBreakdown, validMissionDefinition } from './MissionEngine';
+import { historicalUnit } from '../attachments/queries';
 const valid = (n: number, min = 0) => Number.isSafeInteger(n) && n >= min;
 const fail = () => { throw new Error('Invalid mission snapshot'); };
 /** Mission is optional in schema 3: previous Task snapshots load unchanged. */
@@ -31,7 +32,7 @@ export function validateMissionState(s: GameState) {
       [...h.deck, ...h.hand, ...h.discarded, ...h.completed].some(id => !d.secondaries.some(x => x.id === id && x.mode === 'TACTICAL')) ||
       Object.values(primary).some(n => !valid(n)) || Object.values(secondary).some(n => !valid(n))) fail();
   }
-  for (const a of m.activeActions) if (!d.actions.some(x => x.id === a.actionId && x.completes === a.completesAt) || !s.units.some(u => u.id === a.unitId && u.playerId === a.playerId) ||
+  for (const a of m.activeActions) if (!d.actions.some(x => x.id === a.actionId && x.completes === a.completesAt) || historicalUnit(s,a.unitId)?.playerId !== a.playerId ||
     !['ACTIVE', 'INTERRUPTED', 'COMPLETED', 'FAILED'].includes(a.state) || !valid(a.startedAt.turn, 1) || a.startedAt.turn > s.turn ||
     !valid(a.startedAt.round, 1) || a.startedAt.round > s.round || !['Command', 'Movement', 'Shooting', 'Charge', 'Fight'].includes(a.startedAt.phase) ||
     (a.state === 'ACTIVE' && (a.startedAt.turn !== s.turn || s.status !== 'in-progress'))) fail();

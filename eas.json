@@ -1,0 +1,16 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "node": "24.19.0",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      }
+    }
+  }
+}

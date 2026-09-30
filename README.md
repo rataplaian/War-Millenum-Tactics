@@ -171,3 +171,7 @@ The complete official mission card deck, faction rules, AI, army building, multi
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 
 Development workflow: Codex cloud workspace → GitHub feature branch → pull request → CI → review. No operation on the user’s PC is required. Merge into main only after explicit authorization.
+
+## Android APK preview
+
+For an installable Android preview without Metro or Expo Go, see [Android preview setup](docs/ANDROID_PREVIEW.md). The EAS `preview` profile builds an internally distributed APK; Expo authentication and initial project/signing setup are required before the first build.

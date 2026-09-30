@@ -100,6 +100,9 @@ export class TransportController {
   private finishPassenger(u: Unit) {
     const s = this.s, ts = transportState(s), tx = ts.disembark!;
     u.location = u.models.some(m => m.alive) ? 'BATTLEFIELD' : 'DESTROYED'; delete u.embarked; u.setupAtTurn = s.turn; delete u.moveLock;
+    // Pre-battle passengers were absent from the deployment queue. Record their
+    // first battlefield arrival so later snapshots remain valid after disembark.
+    if (s.deployment?.stage === 'BATTLE_STARTED' && !s.deployment.deployed.includes(u.id)) s.deployment.deployed.push(u.id);
     u.lastMove = { kind: 'DISEMBARK_MOVE', turn: s.turn, phase: s.phase };
     if (!['TACTICAL', 'ASSAULT', 'SHOCK'].includes(tx.mode)) u.cannotChargeUntilTurn = s.turn;
     if (tx.mode === 'COMBAT' || tx.mode === 'EMERGENCY') { u.state.battleShocked = true; flowEvent(s, 'BATTLE_SHOCK_APPLIED', { source: tx.mode }, u.id, u.playerId); }

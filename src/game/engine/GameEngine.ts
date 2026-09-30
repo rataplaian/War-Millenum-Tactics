@@ -147,6 +147,9 @@ export class GameEngine {
         flowEvent(s,'BATTLE_SHOCK_ROLL_RESOLVED',{rolls:shock.rolls,total:shock.total,success:shock.success,source:'DOOM_SIREN'},target.id,target.playerId);
         if(!shock.success) openWindow(s,'AFTER_BATTLE_SHOCK_FAILED',{unitId:target.id,targetUnitId:target.id});
       }
+      processAttachmentCasualties(s);
+      detectDestroyedTransports(s);
+      normalizeDestroyed(s);
       return {ok:true,value:{rolls,mortalWounds:result.applied}};
     });
   }

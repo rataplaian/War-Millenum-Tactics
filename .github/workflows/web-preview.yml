@@ -1,7 +1,7 @@
 name: Browser Playtest
 on:
   push:
-    branches: [main, feature/task-013b-browser-playtest, feature/task-014-unit-tokens-play-ux]
+    branches: [main, feature/task-013b-browser-playtest, feature/task-014-unit-tokens-play-ux, feature/task-015-emergent-battlefield-ux]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
         with:
           path: dist
   deploy:
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/task-013b-browser-playtest' || github.ref == 'refs/heads/feature/task-014-unit-tokens-play-ux')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/task-013b-browser-playtest' || github.ref == 'refs/heads/feature/task-014-unit-tokens-play-ux' || github.ref == 'refs/heads/feature/task-015-emergent-battlefield-ux')
     needs: web-build
     runs-on: ubuntu-latest
     timeout-minutes: 10

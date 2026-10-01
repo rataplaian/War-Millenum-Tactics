@@ -563,3 +563,13 @@ The runner's progress key includes completed Pile In, Consolidation and Fight un
 ## Task 014 presentation layer
 
 `src/ui/unitPresentation.ts` maps original datasheet/component identity to token art and visual categories; `tokenArt.ts` resolves bundled images. BattlefieldView draws each living runtime Model using authoritative positions/base sizes, including original portraits for attached leaders. Zoom changes only screen coordinates. `playCommands.ts` supplies readable names/grouping over LegalActions. PlayScreen stores pending UI choices separately and commits only through PlaySession.submit after confirmation; engine previews and legal suggestions drive markers. See [Task 014](TASK_014_PLAY_UX.md).
+
+## Battlefield-first presentation (Task 015)
+
+`battlefieldInteraction.ts` derives contextual commands and detached previews from
+LegalActions. `TacticalRangeOverlay` renders informational physical reach;
+`RadialActionMenu` handles viewport placement only. `UnitInfoPanel`, `WeaponBubbles`
+and `AttackCard` display catalog/runtime data and existing action choices.
+`CombatFeedback` consumes completed combat events. All live human mutations still
+pass through `PlaySession.submit`; no rules or RNG are moved into the UI.
+See [Task 015 UX port](TASK_015_EMERGENT_UX.md) for reference boundaries and limits.

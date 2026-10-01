@@ -171,3 +171,7 @@ The complete official mission card deck, faction rules, AI, army building, multi
 See [architecture](docs/ARCHITECTURE.md) for data migration details, command semantics, geometry and configuration.
 
 Development workflow: Codex cloud workspace → GitHub feature branch → pull request → CI → review. No operation on the user’s PC is required. Merge into main only after explicit authorization.
+
+## Browser playtest (Task 013B)
+
+The browser preview uses the same React Native screens, GameEngine and AI as Android. `npm run export:web` builds a static SPA for GitHub Pages at `/War-Millenum-Tactics/`; players need neither Metro nor an Expo account. See [Browser Playtest](docs/BROWSER_PLAYTEST.md) for deployment and limitations.

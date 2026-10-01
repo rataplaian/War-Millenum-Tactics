@@ -27,7 +27,8 @@
     "typecheck:engine": "tsc -p tsconfig.engine.json",
     "check": "npm test && npm run typecheck && npm run typecheck:engine",
     "export:mobile": "expo export --platform android --platform ios",
-    "export:web": "expo export --platform web"
+    "export:web": "expo export --platform web",
+    "export": "npm run export:web"
   },
   "private": true,
   "engines": {

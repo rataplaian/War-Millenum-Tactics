@@ -179,3 +179,8 @@ The browser preview uses the same React Native screens, GameEngine and AI as And
 ## Task 014 — Unit tokens and guided PLAY
 
 PLAY now uses unit portraits, one base per living runtime model, battlefield zoom/panning and a Select → Choose → Confirm command panel. See [Task 014 play interaction](docs/TASK_014_PLAY_UX.md) for token mapping, controls and limits. The same UI runs on browser and Android.
+
+PLAY now supports battlefield-first selection, contextual action bubbles, physical
+range previews, weapon/target choices, read-only enemy information and completed
+combat feedback. More actions retains setup and uncommon controls. The authoritative
+engine and AI are unchanged. See [Task 015](docs/TASK_015_EMERGENT_UX.md).

@@ -1,0 +1,20 @@
+import type { ImageSourcePropType } from 'react-native';
+export const TOKEN_ART: Record<string, ImageSourcePropType> = {
+  'aeldari-seer': require('../../assets/tokens/aeldari-seer.jpg'),
+  'aeldari-autarch': require('../../assets/tokens/aeldari-autarch.jpg'),
+  'aeldari-avenger': require('../../assets/tokens/aeldari-avenger.jpg'),
+  'aeldari-dragon': require('../../assets/tokens/aeldari-dragon.jpg'),
+  'aeldari-guardian': require('../../assets/tokens/aeldari-guardian.jpg'),
+  'aeldari-ranger': require('../../assets/tokens/aeldari-ranger.jpg'),
+  'aeldari-reaper': require('../../assets/tokens/aeldari-reaper.jpg'),
+  'aeldari-spinner': require('../../assets/tokens/aeldari-spinner.jpg'),
+  'aeldari-serpent': require('../../assets/tokens/aeldari-serpent.jpg'),
+  'ec-exultant': require('../../assets/tokens/ec-exultant.jpg'),
+  'ec-sorcerer': require('../../assets/tokens/ec-sorcerer.jpg'),
+  'ec-kakophonist': require('../../assets/tokens/ec-kakophonist.jpg'),
+  'ec-infractor': require('../../assets/tokens/ec-infractor.jpg'),
+  'ec-tormentor': require('../../assets/tokens/ec-tormentor.jpg'),
+  'ec-blade': require('../../assets/tokens/ec-blade.jpg'),
+  'ec-noise': require('../../assets/tokens/ec-noise.jpg'),
+  'ec-tank': require('../../assets/tokens/ec-tank.jpg'),
+};

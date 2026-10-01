@@ -1,20 +1,26 @@
 import { onBattlefield } from '../game/reserves/location';
 import { TerrainOverlay } from './TerrainOverlay';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { GameState, Position } from '../game/models';
 import { baseRadius } from '../game/utils/geometry';
 import { coordinateTransform } from './coordinates';
+import { TOKEN_ART } from './tokenArt';
+import { modelDefinitionId, UNIT_VISUALS, unitName } from './unitPresentation';
 export const PLAYER_COLORS = ['#60a5fa', '#f472b6'] as const;
 interface Props {
   state: GameState;
   selectedModelId: string | null;
   target: { position: Position; legal: boolean } | null;
+  selectedUnitId?: string | null;
+  validTargetIds?: string[];
+  humanPlayerId?: string;
+  previewPositions?: Record<string, Position>;
   samples?: { position: Position; legal: boolean }[];
   onModel: (unitId: string, modelId: string) => void;
   onTarget: (position: Position) => void;
 }
-export function BattlefieldView({ state, selectedModelId, target, onModel, onTarget, samples = [] }: Props) {
+export function BattlefieldView({ state, selectedModelId, target, onModel, onTarget, samples = [], selectedUnitId, validTargetIds = [], humanPlayerId, previewPositions }: Props) {
   const [width, setWidth] = useState(0);
   const height = width * state.battlefield.height / state.battlefield.width;
   const transform = width > 0 ? coordinateTransform(state.battlefield, { width, height }) : null;
@@ -31,17 +37,20 @@ export function BattlefieldView({ state, selectedModelId, target, onModel, onTar
         backgroundColor: blocker.opaque ? '#64748b' : '#475569', opacity: 0.6 }} />;
     })}
     {transform && <TerrainOverlay state={state} transform={transform} />}
-    {transform && samples.map((sample, i) => <View key={`sample-${i}`} pointerEvents="none" style={{ position: 'absolute', left: transform.gameToScreen(sample.position).x - 2, top: transform.gameToScreen(sample.position).y - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: sample.legal ? '#4ade80' : '#f87171', opacity: 0.65 }} />)}
-    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive && (onBattlefield(unit) || (!!state.setup?.positions[m.id] || !!state.transportState?.disembark?.positions[m.id]))).map((model, i) => {
-      const centre = transform.gameToScreen(state.setup?.positions[model.id] ?? state.transportState?.disembark?.positions[model.id] ?? model.position);
+    {transform && samples.map((sample, i) => <View key={`sample-${i}`} pointerEvents="none" style={{ position: 'absolute', left: transform.gameToScreen(sample.position).x - 2, top: transform.gameToScreen(sample.position).y - 2, width: 10, height: 10, borderRadius: 5, backgroundColor: sample.legal ? '#4ade80' : '#f87171', opacity: 0.65 }} />)}
+    {transform && state.units.flatMap(unit => unit.models.filter(m => m.alive && (onBattlefield(unit) || (!!previewPositions?.[m.id] || !!state.setup?.positions[m.id] || !!state.transportState?.disembark?.positions[m.id]))).map((model, i) => {
+      const centre = transform.gameToScreen(previewPositions?.[model.id] ?? state.setup?.positions[model.id] ?? state.transportState?.disembark?.positions[model.id] ?? model.position);
       const diameter = baseRadius(model.base) * 2 * transform.scale;
       const playerIndex = state.players.findIndex(p => p.id === unit.playerId);
-      return <Pressable key={model.id} accessibilityRole="button" accessibilityLabel={`${unit.id}, model ${i + 1}`}
+      const visual=UNIT_VISUALS[modelDefinitionId(state,unit,model)];
+      const color=validTargetIds.includes(unit.id)?'#4ade80':selectedUnitId===unit.id?'#facc15':PLAYER_COLORS[playerIndex];
+      return <Pressable key={model.id} accessibilityRole="button" accessibilityLabel={`${unitName(state,unit.id)}, model ${i + 1}${selectedModelId===model.id?", selected":""}`}
         onPress={() => onModel(unit.id, model.id)}
         style={{ position: 'absolute', left: centre.x - diameter / 2, top: centre.y - diameter / 2,
           width: diameter, height: diameter, borderRadius: diameter / 2, backgroundColor: PLAYER_COLORS[playerIndex],
-          borderWidth: 2, borderColor: selectedModelId === model.id ? '#fef08a' : '#0f172a', alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: '#0f172a', fontSize: 10, fontWeight: 'bold' }}>{i + 1}</Text>
+          borderWidth: selectedModelId===model.id?3:2, borderColor: color, overflow:'hidden', opacity:previewPositions?.[model.id]?0.65:1, alignItems: 'center', justifyContent: 'center' }}>
+        {visual && <Image source={TOKEN_ART[visual.token]} style={StyleSheet.absoluteFill} resizeMode="cover"/>}
+        <Text pointerEvents="none" style={{ color: '#fff', backgroundColor:'#111827b0', fontSize: Math.max(8,Math.min(12,diameter/3)), fontWeight: 'bold' }}>{i + 1}</Text>
       </Pressable>;
     }))}
     {transform && target && <View pointerEvents="none" style={{ position: 'absolute',

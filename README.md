@@ -175,3 +175,7 @@ Development workflow: Codex cloud workspace → GitHub feature branch → pull r
 ## Browser playtest (Task 013B)
 
 The browser preview uses the same React Native screens, GameEngine and AI as Android. `npm run export:web` builds a static SPA for GitHub Pages at `/War-Millenum-Tactics/`; players need neither Metro nor an Expo account. See [Browser Playtest](docs/BROWSER_PLAYTEST.md) for deployment and limitations.
+
+## Task 014 — Unit tokens and guided PLAY
+
+PLAY now uses unit portraits, one base per living runtime model, battlefield zoom/panning and a Select → Choose → Confirm command panel. See [Task 014 play interaction](docs/TASK_014_PLAY_UX.md) for token mapping, controls and limits. The same UI runs on browser and Android.
